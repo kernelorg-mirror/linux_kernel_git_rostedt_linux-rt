@@ -2081,6 +2081,13 @@ static void invoke_rcu_core(void)
 static void __call_rcu_core(struct rcu_state *rsp, struct rcu_data *rdp,
 			    struct rcu_head *head, unsigned long flags)
 {
+	/* Restart the timer if needed to handle the callbacks */
+	if (cpuset_adaptive_nohz()) {
+		/* Make updates on nxtlist visible to self IPI */
+		barrier();
+		smp_cpuset_update_nohz(smp_processor_id());
+	}
+
 	/*
 	 * If called from an extended quiescent state, invoke the RCU
 	 * core in order to force a re-evaluation of RCU's idleness.
