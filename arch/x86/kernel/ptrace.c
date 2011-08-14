@@ -22,6 +22,7 @@
 #include <linux/perf_event.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/rcupdate.h>
+#include <linux/tick.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
@@ -1461,6 +1462,10 @@ long syscall_trace_enter(struct pt_regs *regs)
 {
 	long ret = 0;
 
+	/* Notify nohz task syscall early so the rest can use rcu */
+	/* (SDR: Does the rcu_user_exit() make this obsolete?) */
+	tick_nohz_enter_kernel();
+
 	rcu_user_exit();
 
 	/*
@@ -1528,4 +1533,10 @@ void syscall_trace_leave(struct pt_regs *regs)
 		tracehook_report_syscall_exit(regs, step);
 
 	rcu_user_enter();
+	/*
+	 * Notify nohz task exit syscall at last so the rest can
+	 * use rcu.
+	 * (SDR: does the above make this obsolete?)
+	 */
+	tick_nohz_exit_kernel();
 }
