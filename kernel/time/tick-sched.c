@@ -376,6 +376,7 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
 		if (!ts->tick_stopped) {
 			ts->last_tick = hrtimer_get_expires(&ts->sched_timer);
 			ts->tick_stopped = 1;
+			trace_printk("Stop tick\n");
 		}
 
 		/*
@@ -581,6 +582,7 @@ static void tick_nohz_cpuset_stop_tick(struct tick_sched *ts)
 
 		ts->saved_jiffies = jiffies;
 		set_thread_flag(TIF_NOHZ);
+		trace_printk("set TIF_NOHZ\n");
 	}
 }
 #else
@@ -659,6 +661,7 @@ static void __tick_nohz_restart_sched_tick(struct tick_sched *ts, ktime_t now)
 	ts->idle_exittime = now;
 
 	tick_nohz_restart(ts, now);
+	trace_printk("Restart sched tick\n");
 }
 
 /**
@@ -1012,6 +1015,7 @@ static void tick_nohz_restart_adaptive(void)
 	tick_nohz_flush_current_times(true);
 	tick_nohz_restart_sched_tick();
 	clear_thread_flag(TIF_NOHZ);
+	trace_printk("clear TIF_NOHZ\n");
 	tick_nohz_cpu_exit_qs();
 }
 
@@ -1031,6 +1035,7 @@ void cpuset_exit_nohz_interrupt(void *unused)
 {
 	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
 
+	trace_printk("IPI: Nohz exit\n");
 	if (ts->tick_stopped && !is_idle_task(current))
 		tick_nohz_restart_adaptive();
 }
@@ -1052,6 +1057,7 @@ void tick_nohz_pre_schedule(void)
 	if (test_thread_flag(TIF_NOHZ)) {
 		tick_nohz_flush_current_times(true);
 		clear_thread_flag(TIF_NOHZ);
+		trace_printk("clear TIF_NOHZ\n");
 		/* FIXME: warn if we are in RCU idle mode */
 	}
 }
@@ -1147,6 +1153,7 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 		}
 		update_process_times(user);
 		profile_tick(CPU_PROFILING);
+		trace_printk("tick\n");
 	}
 
 	hrtimer_forward(timer, now, tick_period);
