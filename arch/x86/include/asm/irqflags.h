@@ -8,7 +8,7 @@
  * Interrupt control:
  */
 
-static inline unsigned long native_save_fl(void)
+static inline unsigned long raw_native_save_fl(void)
 {
 	unsigned long flags;
 
@@ -26,7 +26,7 @@ static inline unsigned long native_save_fl(void)
 	return flags;
 }
 
-static inline void native_restore_fl(unsigned long flags)
+static inline void raw_native_restore_fl(unsigned long flags)
 {
 	asm volatile("push %0 ; popf"
 		     : /* no output */
@@ -34,12 +34,12 @@ static inline void native_restore_fl(unsigned long flags)
 		     :"memory", "cc");
 }
 
-static inline void native_irq_disable(void)
+static inline void raw_native_irq_disable(void)
 {
 	asm volatile("cli": : :"memory");
 }
 
-static inline void native_irq_enable(void)
+static inline void raw_native_irq_enable(void)
 {
 	asm volatile("sti": : :"memory");
 }
@@ -53,6 +53,11 @@ static inline void native_halt(void)
 {
 	asm volatile("hlt": : :"memory");
 }
+
+#define native_save_fl() raw_native_save_fl()
+#define native_restore_fl(flags) raw_native_restore_fl(flags)
+#define native_irq_disable() raw_native_irq_disable()
+#define native_irq_enable() raw_native_irq_enable()
 
 #endif
 
