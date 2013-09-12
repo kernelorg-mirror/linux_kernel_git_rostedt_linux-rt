@@ -548,7 +548,9 @@ asmlinkage void __init start_kernel(void)
 	radix_tree_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
+	printk("INIT IRQS\n");
 	init_IRQ();
+	printk("IRQS INIT\n");
 	tick_init();
 	init_timers();
 	hrtimers_init();

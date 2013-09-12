@@ -572,6 +572,7 @@ static int is_f00f_bug(struct pt_regs *regs, unsigned long address)
 static const char nx_warning[] = KERN_CRIT
 "kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n";
 
+void native_irq_soft_disable_debug(void);
 static void
 show_fault_oops(struct pt_regs *regs, unsigned long error_code,
 		unsigned long address)
@@ -584,10 +585,12 @@ show_fault_oops(struct pt_regs *regs, unsigned long error_code,
 
 		pte_t *pte = lookup_address(address, &level);
 
-		if (pte && pte_present(*pte) && !pte_exec(*pte))
+		if (pte && pte_present(*pte) && !pte_exec(*pte)) {
 			printk(nx_warning, from_kuid(&init_user_ns, current_uid()));
+		}
 	}
 
+	native_irq_soft_disable_debug();
 	printk(KERN_ALERT "BUG: unable to handle kernel ");
 	if (address < PAGE_SIZE)
 		printk(KERN_CONT "NULL pointer dereference");

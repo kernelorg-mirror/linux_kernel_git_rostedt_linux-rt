@@ -104,6 +104,16 @@ void __init init_IRQ(void)
 		per_cpu(vector_irq, 0)[IRQ0_VECTOR + i] = i;
 
 	x86_init.irqs.intr_init();
+
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+	{
+		unsigned long flags;
+		/* Enable interrupts for real */
+		flags = raw_native_save_fl();
+		flags |= X86_EFLAGS_IF;
+		raw_native_restore_fl(flags);
+	}
+#endif
 }
 
 /*

@@ -973,6 +973,17 @@ END(irq_entries_start)
 END(interrupt)
 .previous
 
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+	.macro SOFT_DISABLED func
+	movq $\func, %rsi
+	call native_check_irq_disable
+	.endm
+#else
+	.macro SOFT_DISABLED func
+	call \func
+	.endm
+#endif
+
 /*
  * Interrupt entry/exit.
  *
@@ -987,7 +998,7 @@ END(interrupt)
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
-	call \func
+	SOFT_DISABLED \func
 	.endm
 
 /*
@@ -1643,6 +1654,57 @@ ENTRY(error_exit)
 	jmp retint_swapgs
 	CFI_ENDPROC
 END(error_exit)
+
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+/*
+ * Called with interrupts disabled.
+ * Returns enabling interrupts
+ * The calling function was kind enough to pass
+ * us the irq stack that we need to use.
+ * As well as the function we need to call, and orig_ax
+ */
+ENTRY(native_simulate_irq)
+	CFI_STARTPROC
+	/* Save the current stack pointer */
+	movq %rsp, %rcx
+	/* Set us up to the new stack */
+	movq %rdi, %rsp
+	/* Save the stack frame as if we came from an interrupt */
+	pushq_cfi $__KERNEL_DS
+	pushq_cfi %rcx
+	/* pop off the return addr for the return stack */
+	subq $8, (%rsp)
+	pushfq_cfi
+	/* We want to return with interrupts enabled */
+	addq $X86_EFLAGS_IF, (%rsp)
+	pushq_cfi $__KERNEL_CS
+	pushq_cfi (%rcx)
+
+	/* Add the saved vector */
+	pushq_cfi %rdx
+
+	/* Function to call is in %rsi, but that will be clobbered */
+	movq %rsi, %rcx
+
+	/* Copied from interrupt macro */
+	subq $ORIG_RAX-RBP, %rsp
+	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
+	SAVE_ARGS_IRQ
+
+	/* put our function back */
+	movq %rcx, %rsi
+	
+	/* Call the triggered function */
+	call native_check_irq_disable
+
+	/*
+	 * This will read our stack, and return
+	 * enabling interrupts.
+	 */
+	jmp ret_from_intr
+	CFI_ENDPROC
+END(native_simulate_irq)
+#endif /* CONFIG_IRQ_SOFT_DISABLE */
 
 /*
  * Test if a given stack is an NMI stack or not.

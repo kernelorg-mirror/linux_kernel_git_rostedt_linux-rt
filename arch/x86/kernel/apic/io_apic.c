@@ -2071,6 +2071,7 @@ static int __init notimercheck(char *s)
 }
 __setup("no_timer_check", notimercheck);
 
+void native_irq_soft_disable_debug(void);
 /*
  * There is a nasty bug in some older SMP boards, their mptable lies
  * about the timer IRQ. We do the following to work around the situation:
@@ -2083,12 +2084,16 @@ static int __init timer_irq_works(void)
 {
 	unsigned long t1 = jiffies;
 	unsigned long flags;
+	unsigned long fl, real;
+	int ret;
 
 	if (no_timer_check)
 		return 1;
 
 	local_save_flags(flags);
 	local_irq_enable();
+	fl = native_save_fl();
+	real = raw_native_save_fl();
 	/* Let ten ticks pass... */
 	mdelay((10 * 1000) / HZ);
 	local_irq_restore(flags);
@@ -2101,10 +2106,15 @@ static int __init timer_irq_works(void)
 	 * least one tick may be lost due to delays.
 	 */
 
+	ret = 0;
 	/* jiffies wrap? */
 	if (time_after(jiffies, t1 + 4))
-		return 1;
-	return 0;
+		ret = 1;
+	printk("TIMER CHECK = %d if=%lx real=%lx, now if=%lx real=%lx\n",
+	       ret, fl, real,
+	       native_save_fl(), raw_native_save_fl());
+	native_irq_soft_disable_debug();
+	return ret;
 }
 
 /*

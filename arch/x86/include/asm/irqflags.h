@@ -54,12 +54,19 @@ static inline void native_halt(void)
 	asm volatile("hlt": : :"memory");
 }
 
+#ifndef CONFIG_IRQ_SOFT_DISABLE
 #define native_save_fl() raw_native_save_fl()
 #define native_restore_fl(flags) raw_native_restore_fl(flags)
 #define native_irq_disable() raw_native_irq_disable()
 #define native_irq_enable() raw_native_irq_enable()
+#else
+unsigned long native_save_fl(void);
+void native_irq_disable(void);
+void native_irq_enable(void);
+void native_restore_fl(unsigned long flags);
+#endif /* CONFIG_IRQ_SOFT_DISABLE */
 
-#endif
+#endif /* !__ASSEMBLY__ */
 
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
