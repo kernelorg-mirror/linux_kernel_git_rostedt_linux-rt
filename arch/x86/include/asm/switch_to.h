@@ -1,6 +1,8 @@
 #ifndef _ASM_X86_SWITCH_TO_H
 #define _ASM_X86_SWITCH_TO_H
 
+#include <asm/irqflags.h>
+
 struct task_struct; /* one of the stranger aspects of C forward declarations */
 struct task_struct *__switch_to(struct task_struct *prev,
 				struct task_struct *next);
@@ -80,7 +82,15 @@ do {									\
 
 /* frame pointer must be last for get_wchan */
 #define SAVE_CONTEXT    "pushf ; pushq %%rbp ; movq %%rsi,%%rbp\n\t"
-#define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp ; popf\t"
+#define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp ; " LAZY_CONTEXT "popf\t"
+
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+# define LAZY_CONTEXT "testq $-1, %%gs:lazy_irq_func; jne 1f;\n\t" \
+	"testq $(-1<<1),%%gs:lazy_irq_disabled_flags; jne 1f;\n\t" \
+	"orq $(1<<9),(%%rsp); jmp 2f; 1: andq $~(1<<9),(%%rsp); 2:\n\t"
+#else
+# define LAZY_CONTEXT
+#endif
 
 #define __EXTRA_CLOBBER  \
 	, "rcx", "rbx", "rdx", "r8", "r9", "r10", "r11", \

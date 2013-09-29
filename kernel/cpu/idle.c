@@ -131,5 +131,6 @@ void cpu_startup_entry(enum cpuhp_state state)
 #endif
 	current_set_polling();
 	arch_cpu_idle_prepare();
+	printk("cpu idle loop\n");
 	cpu_idle_loop();
 }

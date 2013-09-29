@@ -1001,6 +1001,8 @@ static inline bool smap_violation(int error_code, struct pt_regs *regs)
 	return true;
 }
 
+DECLARE_PER_CPU(long, lazy_irq_disabled_flags);
+
 /*
  * This routine handles page faults.  It determines the address,
  * and the problem, and then passes it off to one of the appropriate

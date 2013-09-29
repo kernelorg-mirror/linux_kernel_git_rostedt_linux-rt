@@ -547,6 +547,10 @@ ENTRY(ret_from_fork)
 	pushq_cfi $0x0002
 	popfq_cfi				# reset kernel eflags
 
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+	orq $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
+#endif
+
 	call schedule_tail			# rdi: 'prev' task parameter
 
 	GET_THREAD_INFO(%rcx)
@@ -974,14 +978,134 @@ END(interrupt)
 .previous
 
 #ifdef CONFIG_IRQ_SOFT_DISABLE
-	.macro SOFT_DISABLED func
-	movq $\func, %rsi
-	call native_check_irq_disable
+	.macro LAZY_DEBUG int func=0
+	pushq %rdi
+	pushq %rsi
+	movq 16(%rsp), %rsi
+	pushq %rdx
+	pushq %rcx
+	pushq %rax
+	pushq %r8
+	pushq %r9
+	pushq %r10
+	pushq %r11
+	pushq %rbx
+	pushq %rbp
+	pushq %r12
+	pushq %r13
+	pushq %r14
+	pushq %r15
+	movq $\int, %rdi
+	movq $\func, %rdx
+	call lazy_irq_debug
+	popq %r15
+	popq %r14
+	popq %r13
+	popq %r12
+	popq %rbp
+	popq %rbx
+	popq %r11
+	popq %r10
+	popq %r9
+	popq %r8
+	popq %rax
+	popq %rcx
+	popq %rdx
+	popq %rsi
+	popq %rdi
+	jmp 1f
+1:
 	.endm
+	
+	.macro SOFT_DISABLED_START func
+	bt $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
+	jnc 1f
+	pushq $\func
+	jmp irq_is_disabled
+1:
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+
+#if 0
+	LAZY_DEBUG 0
+#endif
+
+	.endm
+
+	.macro SOFT_DISABLED_DONE
+	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+	.endm
+
+	/*
+	 * The lazy soft disabling of interrupts is for
+	 * performance reasons, as enabling interrupts can
+	 * have a cost. But when the hardware disables
+	 * interrupts, it's rather pointless to use the soft
+	 * disabling feature.
+	 *
+	 * When a trap is hit, interrupts are disabled.
+	 * This is where things get a little tricky.
+	 * If interrupts are soft disabled, we keep interrupts disabled
+	 * throughout the trap.
+	 * On return of the trap, we check if there's a pending interrupt.
+	 * If there is, we keep the interrupts disabled. But if there's
+	 * no pending interrupt, we enabled them, again.
+	 *
+	 * If interrupts are not soft disabled at the start of the trap.
+	 * We treat the trap like a normal interrupt.
+	 */
+	.macro SOFT_DISABLE_TRAP_ENTRY
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+
+	/* If interrupts are soft disabled, then make eflags disabled too */
+	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
+	jnc 1f
+	andq $~(1<<9), EFLAGS(%rsp)
+1:
+	.endm
+
+	.macro SOFT_DISABLE_TRAP_EXIT
+	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+
+	/* Soft disabled? */
+	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
+	jnc 1f
+
+	/*
+	 * If we are nested or there's a pending interrupt,
+	 * keep interrupts disabled, otherwise enabled them.
+	 */
+
+	/* Interrupt triggered? */
+	testl $-1, PER_CPU_VAR(lazy_irq_func)
+	jne 1f
+
+	movq PER_CPU_VAR(lazy_irq_disabled_flags), %rax
+	shrq $LAZY_IRQ_REAL_DISABLE_BIT, %rax
+	/* nested? */
+	jne 1f
+
+	/* Return with interrupts enabled */
+	orq $(1 << 9), EFLAGS(%rsp)
+1:
+	.endm
+
+irq_is_disabled:
+	/* function is saved in stack */
+	popq PER_CPU_VAR(lazy_irq_func)
+	/* Get the vector */
+	popq PER_CPU_VAR(lazy_irq_vector)
+
+
+	andq $~(1 << 9), 16(%rsp)	/* keep irqs disabled */
+	jmp irq_return
 #else
 	.macro SOFT_DISABLED func
 	call \func
 	.endm
+#define SOFT_DISABLED_START
+#define SOFT_DISABLED_DONE
+#define SOFT_DISABLE_TRAP_ENTRY
+#define SOFT_DISABLE_TRAP_EXIT
 #endif
 
 /*
@@ -994,11 +1118,13 @@ END(interrupt)
 
 /* 0(%rsp): ~(interrupt number) */
 	.macro interrupt func
+	SOFT_DISABLED_START \func
 	/* reserve pt_regs for scratch regs and rbp */
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
-	SOFT_DISABLED \func
+	call \func
+	SOFT_DISABLED_DONE
 	.endm
 
 /*
@@ -1135,6 +1261,11 @@ ENTRY(retint_kernel)
 	jnc  retint_restore_args
 	bt   $9,EFLAGS-ARGOFFSET(%rsp)	/* interrupts off? */
 	jnc  retint_restore_args
+#ifdef CONFIG_IRQ_SOFT_DISABLE
+	bt $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
+	jc  retint_restore_args
+	orq $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
+#endif
 	call preempt_schedule_irq
 	jmp exit_intr
 #endif
@@ -1243,7 +1374,9 @@ ENTRY(\sym)
 	DEFAULT_FRAME 0
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
+	SOFT_DISABLE_TRAP_ENTRY
 	call \do_sym
+	SOFT_DISABLE_TRAP_EXIT
 	jmp error_exit		/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1261,7 +1394,9 @@ ENTRY(\sym)
 	TRACE_IRQS_OFF
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
+	SOFT_DISABLE_TRAP_ENTRY
 	call \do_sym
+	SOFT_DISABLE_TRAP_EXIT
 	jmp paranoid_exit	/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1281,7 +1416,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
 	subq $EXCEPTION_STKSZ, INIT_TSS_IST(\ist)
+	SOFT_DISABLE_TRAP_ENTRY
 	call \do_sym
+	SOFT_DISABLE_TRAP_EXIT
 	addq $EXCEPTION_STKSZ, INIT_TSS_IST(\ist)
 	jmp paranoid_exit	/* %ebx: no swapgs flag */
 	CFI_ENDPROC
@@ -1300,7 +1437,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi			/* pt_regs pointer */
 	movq ORIG_RAX(%rsp),%rsi	/* get error code */
 	movq $-1,ORIG_RAX(%rsp)		/* no syscall to restart */
+	SOFT_DISABLE_TRAP_ENTRY
 	call \do_sym
+	SOFT_DISABLE_TRAP_EXIT
 	jmp error_exit			/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1320,7 +1459,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi			/* pt_regs pointer */
 	movq ORIG_RAX(%rsp),%rsi	/* get error code */
 	movq $-1,ORIG_RAX(%rsp)		/* no syscall to restart */
+	SOFT_DISABLE_TRAP_ENTRY
 	call \do_sym
+	SOFT_DISABLE_TRAP_EXIT
 	jmp paranoid_exit		/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1660,15 +1801,12 @@ END(error_exit)
  * Called with interrupts disabled.
  * Returns enabling interrupts
  * The calling function was kind enough to pass
- * us the irq stack that we need to use.
- * As well as the function we need to call, and orig_ax
+ * us the irq function and irq vector to use.
  */
 ENTRY(native_simulate_irq)
 	CFI_STARTPROC
 	/* Save the current stack pointer */
 	movq %rsp, %rcx
-	/* Set us up to the new stack */
-	movq %rdi, %rsp
 	/* Save the stack frame as if we came from an interrupt */
 	pushq_cfi $__KERNEL_DS
 	pushq_cfi %rcx
@@ -1680,23 +1818,25 @@ ENTRY(native_simulate_irq)
 	pushq_cfi $__KERNEL_CS
 	pushq_cfi (%rcx)
 
-	/* Add the saved vector */
-	pushq_cfi %rdx
+	ASM_CLAC
 
-	/* Function to call is in %rsi, but that will be clobbered */
-	movq %rsi, %rcx
+	/* Add the saved vector */
+	pushq_cfi %rsi
+
+	/* Function to call is in %rdi, but that will be clobbered */
+	movq %rdi, %rcx
 
 	/* Copied from interrupt macro */
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
 
-	/* put our function back */
-	movq %rcx, %rsi
-	
-	/* Call the triggered function */
-	call native_check_irq_disable
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 
+	/* Call the triggered function */
+	call *%rcx
+
+	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 	/*
 	 * This will read our stack, and return
 	 * enabling interrupts.

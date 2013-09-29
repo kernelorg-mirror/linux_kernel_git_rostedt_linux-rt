@@ -218,4 +218,13 @@ static inline int arch_irqs_disabled(void)
 # endif
 
 #endif /* __ASSEMBLY__ */
+
+#define LAZY_IRQ_DISABLED_BIT		0
+#define LAZY_IRQ_TEMP_DISABLED_BIT	1
+#define LAZY_IRQ_REAL_DISABLE_BIT	2
+
+#define LAZY_IRQ_FL_IRQ_DISABLED	(1 << LAZY_IRQ_DISABLED_BIT)
+#define LAZY_IRQ_FL_TEMP_DISABLED	(1 << LAZY_IRQ_TEMP_DISABLED_BIT)
+#define LAZY_IRQ_FL_REAL_DISABLE	(1 << LAZY_IRQ_REAL_DISABLE_BIT)
+
 #endif

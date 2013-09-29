@@ -2019,7 +2019,11 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	spin_release(&rq->lock.dep_map, 1, _THIS_IP_);
 #endif
 
+	this_cpu_write(sdr_func2, this_cpu_read(lazy_irq_func));
+	this_cpu_write(sdr_flags2, raw_native_save_fl());
 	context_tracking_task_switch(prev, next);
+	this_cpu_write(sdr_func3, this_cpu_read(lazy_irq_func));
+	this_cpu_write(sdr_flags3, raw_native_save_fl());
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
 
@@ -2452,7 +2456,15 @@ need_resched:
 		rq->curr = next;
 		++*switch_count;
 
+		this_cpu_write(sdr_last, __builtin_return_address(0));
+		get_task_struct(prev);
+		this_cpu_write(sdr_task, prev);
+		this_cpu_write(sdr_raw_flags1, raw_native_save_fl());
+		this_cpu_write(sdr_flags1, lazy_irq_flags());
+		this_cpu_write(sdr_func1, this_cpu_read(lazy_irq_func));
 		context_switch(rq, prev, next); /* unlocks the rq */
+		if (this_cpu_read(sdr_task))
+			put_task_struct(this_cpu_read(sdr_task));
 		/*
 		 * The context switch have flipped the stack from under us
 		 * and restored the local variables which were saved when

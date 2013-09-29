@@ -185,9 +185,6 @@ unsigned int __irq_entry do_IRQ(struct pt_regs *regs)
 	unsigned vector = ~regs->orig_ax;
 	unsigned irq;
 
-	if (test_irq_softdisable(regs, do_IRQ))
-		return 1;
-
 	irq_enter();
 	exit_idle();
 
@@ -371,10 +368,15 @@ void fixup_irqs(void)
 #include <linux/percpu.h>
 #include <asm/local.h>
 
-/* Start out with interrupts disabled */
-static DEFINE_PER_CPU(local_t, is_native_irq_disabled) = LOCAL_INIT(X86_EFLAGS_IF);
-static DEFINE_PER_CPU(void *, native_trigger_func);
-static DEFINE_PER_CPU(unsigned long, native_orig_ax);
+/* Start out enabling and disabling for real */
+DEFINE_PER_CPU(local_t, lazy_irq_disabled_flags) = LOCAL_INIT(LAZY_IRQ_FL_TEMP_DISABLED);
+DEFINE_PER_CPU(void *, lazy_irq_func);
+DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
+
+#define BUG_ON_IRQS_ENABLED()					\
+	do {							\
+		BUG_ON(raw_native_save_fl() & X86_EFLAGS_IF);	\
+	} while (0)
 
 static DEFINE_PER_CPU(local_t, debug_count);
 static DEFINE_PER_CPU(void *, last_irq_disabled);
@@ -384,44 +386,110 @@ static DEFINE_PER_CPU(long, last_irq_disabled_cnt);
 static DEFINE_PER_CPU(long, last_irq_enabled_cnt);
 static DEFINE_PER_CPU(long, last_trigger_cnt);
 
-#define UPDATE_NATIVE(ptr, val)						\
+#define UPDATE_LAZY(ptr, val)						\
 	do {								\
 		this_cpu_write(ptr, val);				\
 		this_cpu_write(ptr##_cnt,				\
 			local_inc_return(&__get_cpu_var(debug_count)));	\
 	} while (0)
 
-#define PRINT_NATIVE_FUNC(ptr)			\
+#define PRINT_LAZY_FUNC(ptr)			\
 	printk(" %s: [%ld] %pS (%p)\n",		\
 		#ptr,				\
 		this_cpu_read(ptr##_cnt),	\
 		this_cpu_read(ptr),		\
 	       this_cpu_read(ptr))
 
-void native_irq_soft_disable_debug(void)
+void lazy_irq_soft_disable_debug(void)
 {
 	preempt_disable();
-	PRINT_NATIVE_FUNC(last_irq_disabled);
-	PRINT_NATIVE_FUNC(last_irq_enabled);
-	PRINT_NATIVE_FUNC(last_trigger);
+	PRINT_LAZY_FUNC(last_irq_disabled);
+	PRINT_LAZY_FUNC(last_irq_enabled);
+	PRINT_LAZY_FUNC(last_trigger);
 	preempt_enable();
 }
 
-enum {
-	NATIVE_IRQ_DO_ENABLE		= 1,
-	NATIVE_IRQ_DISABLED		= X86_EFLAGS_IF,
-	NATIVE_IRQ_TRIGGERED		= (1 << 31),
-};
-
-static inline unsigned long get_irq_flags(void)
+__init static int init_lazy_irqs(void)
 {
-	return local_read(&__raw_get_cpu_var(is_native_irq_disabled));
+	int cpu;
+
+	return 0;
+	/* Only boot CPU needs irqs disabled */
+	for_each_possible_cpu(cpu) {
+		if (cpu == smp_processor_id())
+			continue;
+		local_set(&per_cpu(lazy_irq_disabled_flags, cpu), 0);
+	}
+	return 0;
+}
+early_initcall(init_lazy_irqs);
+
+static inline unsigned long get_lazy_irq_flags(void)
+{
+	return local_read(&__raw_get_cpu_var(lazy_irq_disabled_flags));
+}
+
+unsigned long lazy_irq_flags(void)
+{
+	return get_lazy_irq_flags();
+}
+
+DEFINE_PER_CPU(unsigned long, sdr_last);
+DEFINE_PER_CPU(void *, sdr_func1);
+DEFINE_PER_CPU(void *, sdr_func2);
+DEFINE_PER_CPU(void *, sdr_func3);
+DEFINE_PER_CPU(void *, sdr_func4);
+DEFINE_PER_CPU(void *, sdr_func5);
+DEFINE_PER_CPU(void *, sdr_func6);
+DEFINE_PER_CPU(void *, sdr_func7);
+DEFINE_PER_CPU(struct task_struct *, sdr_task);
+DEFINE_PER_CPU(unsigned long, sdr_flags1);
+DEFINE_PER_CPU(unsigned long, sdr_flags2);
+DEFINE_PER_CPU(unsigned long, sdr_flags3);
+DEFINE_PER_CPU(unsigned long, sdr_flags4);
+DEFINE_PER_CPU(unsigned long, sdr_flags5);
+DEFINE_PER_CPU(unsigned long, sdr_flags6);
+DEFINE_PER_CPU(unsigned long, sdr_raw_flags1);
+DEFINE_PER_CPU(unsigned long, sdr_raw_flags2);
+void show_lazy_irq_flags(void)
+{
+	printk(KERN_DEFAULT "LAZY DISABLE FLAGS: %lx\n", get_lazy_irq_flags());
+	printk("last switch %pS\n", this_cpu_read(sdr_last));
+	printk("last flags1 %lx\n", this_cpu_read(sdr_flags1));
+	printk("last flags2 %lx\n", this_cpu_read(sdr_flags2));
+	printk("last flags3 %lx\n", this_cpu_read(sdr_flags3));
+	printk("last flags4 %lx\n", this_cpu_read(sdr_flags4));
+	printk("last flags5 %lx\n", this_cpu_read(sdr_flags5));
+	printk("last flags6 %lx\n", this_cpu_read(sdr_flags6));
+	printk("last raw flags1 %lx\n", this_cpu_read(sdr_raw_flags1));
+	printk("last raw flags2 %lx\n", this_cpu_read(sdr_raw_flags2));
+	printk("last func1 %pS\n", this_cpu_read(sdr_func1));
+	printk("last func2 %pS\n", this_cpu_read(sdr_func2));
+	printk("last func3 %pS\n", this_cpu_read(sdr_func3));
+	printk("last func4 %pS\n", this_cpu_read(sdr_func4));
+	printk("last func5 %pS\n", this_cpu_read(sdr_func5));
+	printk("last func6 %pS\n", this_cpu_read(sdr_func6));
+	printk("last func7 %pS\n", this_cpu_read(sdr_func7));
+	if (this_cpu_read(sdr_task)) {
+		printk("last task %s:%d\n",
+		       this_cpu_read(sdr_task)->comm,
+		       this_cpu_read(sdr_task)->pid);
+	} else
+		printk("last task NULL\n");
+}
+
+void native_irq_soft_disable_debug(void)
+{
+	preempt_disable();
+	printk("lazy_flags=%lx\n", get_lazy_irq_flags());
+	preempt_enable();
 }
 
 int sdr_print;
 unsigned long native_save_fl(void)
 {
-	unsigned long ret;
+	unsigned long flags;
+
 	/*
 	 * It might be possible that if irqs are fully enabled
 	 * we could migrate. But the result of this operation
@@ -431,7 +499,8 @@ unsigned long native_save_fl(void)
 	 * Inverse the result, as the test checks if
 	 * NATIVE_IRQ_DISABLED is clear, not set.
 	 */
-	ret = get_irq_flags();
+	flags = get_lazy_irq_flags();
+
 	if (sdr_print) {
 		void *le = this_cpu_read(last_irq_enabled);
 		void *ld = this_cpu_read(last_irq_disabled);
@@ -439,27 +508,56 @@ unsigned long native_save_fl(void)
 		printk("last enabled: %pS\n", le);
 		printk("last disabled %pS\n", ld);
 		printk("irq=%lx ret=%lx fl=%lx\n",
-		       ret, (~ret) & X86_EFLAGS_IF, raw_native_save_fl());
+		       flags, (~flags) & X86_EFLAGS_IF, raw_native_save_fl());
 	}
-	return (~get_irq_flags()) & X86_EFLAGS_IF;
+	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+		return raw_native_save_fl();
+	return flags & LAZY_IRQ_FL_IRQ_DISABLED ? 0 : X86_EFLAGS_IF;
 }
 EXPORT_SYMBOL(native_save_fl);
 
+static inline void lazy_irq_sub_temp(void)
+{
+	local_sub(LAZY_IRQ_FL_TEMP_DISABLED,
+		  &__get_cpu_var(lazy_irq_disabled_flags));
+}
+
+static inline void lazy_irq_add_temp(void)
+{
+	local_add(LAZY_IRQ_FL_TEMP_DISABLED,
+		  &__get_cpu_var(lazy_irq_disabled_flags));
+}
+
+static inline void lazy_irq_sub_disable(void)
+{
+	local_sub(LAZY_IRQ_FL_IRQ_DISABLED,
+		  &__get_cpu_var(lazy_irq_disabled_flags));
+}
+
+static inline void lazy_irq_add_disable(void)
+{
+	local_add(LAZY_IRQ_FL_IRQ_DISABLED,
+		  &__get_cpu_var(lazy_irq_disabled_flags));
+}
+
 static void __native_irq_disable(void *ip)
 {
-	unsigned long native_flags;
+	unsigned long flags;
 
 	preempt_disable();
-	native_flags = get_irq_flags();
+	flags = get_lazy_irq_flags();
 
-	if (native_flags) {
+	if (flags) {
+		/* Always disable for real not in lazy mode */
+		if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+			raw_native_irq_disable();
 		/* If native_flags are set, we already disabled preemption */
 		preempt_enable();
 		return;
 	}
 
-	UPDATE_NATIVE(last_irq_disabled, ip);
-	local_add(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
+	UPDATE_LAZY(last_irq_disabled, ip);
+	lazy_irq_add_disable();
 	/* Leave with preemption disabled */
 }
 
@@ -471,7 +569,6 @@ EXPORT_SYMBOL(native_irq_disable);
 
 /**
  * native_simulate_irq - simulate an interrupt that triggered during soft disable
- * @stack: The per_cpu interrupt stack to use.
  * @func: The interrupt function to call.
  * @orig_ax: The saved interrupt vector
  *
@@ -480,19 +577,49 @@ EXPORT_SYMBOL(native_irq_disable);
  *
  * Basically this will simulate the 
  */
-extern void native_simulate_irq(void *stack, void *func, unsigned long orig_ax);
+extern void native_simulate_irq(void *func, unsigned long orig_ax);
+
+static void lazy_irq_simulate(void *func)
+{
+	this_cpu_write(lazy_irq_func, NULL);
+
+	BUG_ON_IRQS_ENABLED();
+
+	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
+}
 
 static void __native_irq_enable(void *ip)
 {
 	unsigned long flags;
+	unsigned long raw;
+	void *func;
+	static int once;
+
+	flags = get_lazy_irq_flags();
+	raw = raw_native_save_fl();
 
 	/* Do nothing if already enabled */
-	if (!get_irq_flags())
+	if (!flags)
 		return;
 
-	local_sub(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
+	func = this_cpu_read(lazy_irq_func);
 
-	flags = get_irq_flags();
+	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT) {
+		BUG_ON_IRQS_ENABLED();
+		if (flags & LAZY_IRQ_FL_TEMP_DISABLED) {
+			lazy_irq_sub_temp();
+			if (flags & LAZY_IRQ_FL_IRQ_DISABLED)
+				lazy_irq_sub_disable();
+		}
+
+		if (func)
+			lazy_irq_simulate(func); /* enables interrupts */
+		else
+			raw_native_irq_enable();
+		return;
+	}
+
+	lazy_irq_sub_disable();
 
 	/*
 	 * At this moment we can be in one of two states.
@@ -504,46 +631,62 @@ static void __native_irq_enable(void *ip)
 	 *  about interrupts coming in now. Call native_simulate_irq()
 	 *  to do the nasty work.
 	 */
-	if (unlikely(flags & NATIVE_IRQ_TRIGGERED)) {
-		unsigned long *irq_stack;
-		static int once;
-
-		local_sub(NATIVE_IRQ_TRIGGERED,
-			  &__get_cpu_var(is_native_irq_disabled));
-
-		/*
-		 * If an interrupt was postponed, then no other
-		 * flags should be set here.
-		 */
-		BUG_ON(get_irq_flags());
-
-		irq_stack = (unsigned long *)
-			(this_cpu_read(irq_stack_ptr) - IRQ_STACK_SIZE);
-
-		UPDATE_NATIVE(last_trigger, this_cpu_read(native_trigger_func));
-
-		if (once < 2) {
-			once++;
-		local_add(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
-		printk("simulate IRQ! irq=%x cpu=%d stack=%p func=%pS\n",
-		       raw_native_save_fl(), smp_processor_id(),
-		       irq_stack, this_cpu_read(native_trigger_func));
-		local_sub(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
+	if (unlikely(func)) {
+		if (!once && raw_native_save_fl() & X86_EFLAGS_IF) {
+			once = 1;
+			raw_native_irq_disable();
+			lazy_irq_add_temp();
+			show_lazy_irq_flags();
+			printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
+			printk("raw=%lx\n", raw_native_save_fl());
+			BUG();
 		}
-
-		native_simulate_irq(irq_stack, this_cpu_read(native_trigger_func),
-				    this_cpu_read(native_orig_ax));
-	} else if (flags & NATIVE_IRQ_DO_ENABLE) {
-		/* Enable for real too */
-
-	UPDATE_NATIVE(last_irq_enabled, ip);
-	if (local_read(&__get_cpu_var(is_native_irq_disabled) & NATIVE_IRQ_DO_ENABLE)) {
-		local_sub(NATIVE_IRQ_DO_ENABLE, &__get_cpu_var(is_native_irq_disabled));
-		BUG_ON(raw_native_save_fl() & X86_EFLAGS_IF);
-		raw_native_irq_enable();
+		lazy_irq_simulate(func);
 	}
 
+	if (!once && !(raw_native_save_fl() & X86_EFLAGS_IF)) {
+		once = 1;
+		raw_native_irq_enable();
+		show_lazy_irq_flags();
+		printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
+		printk("raw=%lx\n", raw_native_save_fl());
+		BUG();
+	}
 	preempt_enable();
+}
+
+int lazy_irq_idle_enter(void)
+{
+	/*
+	 * Note, if there's a pending interrupt, then on real hardware
+	 * when the x86_idle() is called, it would trigger immediately.
+	 * We need to imitate that.
+	 *
+	 * Disable interrupts for real, need this anyway, as interrupts
+	 * would be enabled by the cpu idle.
+	 */
+	if (this_cpu_read(lazy_irq_func))
+		BUG_ON_IRQS_ENABLED();
+
+	raw_native_irq_disable();
+	if (this_cpu_read(lazy_irq_func)) {
+		/* Process the interrupt and do not go idle */
+		local_irq_enable();
+		return 0;
+	}
+
+	/* Interrupts will be enabled exiting x86_idle() */
+	BUG_ON(!(get_lazy_irq_flags() & LAZY_IRQ_FL_IRQ_DISABLED));
+	lazy_irq_sub_disable();
+	return 1;
+}
+
+asmlinkage void lazy_irq_debug(long id, long err, void *func)
+{
+	printk("(%ld err=%lx f=%pS) flags=%lx vect=%lx func=%pS\n", id, ~err, func,
+	       get_lazy_irq_flags(),
+	       this_cpu_read(lazy_irq_vector),
+	       this_cpu_read(lazy_irq_func));
 }
 
 void native_irq_enable(void)
@@ -562,48 +705,6 @@ void native_restore_fl(unsigned long flags)
 EXPORT_SYMBOL(native_restore_fl);
 
 typedef void (*irq_func_t)(struct pt_regs *regs);
-
-asmlinkage long
-native_check_irq_disable(struct pt_regs *regs, irq_func_t func)
-{
-	unsigned long native_flags;
-	static int once;
-
-	native_flags = get_irq_flags();
-
-	if (native_flags) {
-		static int once;
-		if (once < 2) {
-			once++;
-			printk("CHECK IRQ DISABLE %pF %lx native=%lx loc=%pF\n",
-			       func, regs->flags, native_flags,
-			       (void *)regs->ip);
-		}
-		BUG_ON(native_flags & NATIVE_IRQ_TRIGGERED);
-		local_add(NATIVE_IRQ_TRIGGERED,
-			  &__get_cpu_var(is_native_irq_disabled));
-		this_cpu_write(native_trigger_func, func);
-		this_cpu_write(native_orig_ax, regs->orig_ax);
-		/* Keep interrupts disabled */
-		regs->flags &= ~X86_EFLAGS_IF;
-		return 1;
-	}
-
-	/* Interrupts are disabled, let the irq know that too */
-	local_add(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
-
-	if (once < 2) {
-		once++;
-		printk("CHECK IRQ REAL %pF %lx native=%lx\n",
-		       func, regs->flags, native_flags);
-	}
-
-	func(regs);
-
-	local_sub(NATIVE_IRQ_DISABLED, &__get_cpu_var(is_native_irq_disabled));
-
-	return 0;
-}
 
 #endif /* CONFIG_IRQ_SOFT_DISABLE */
 
