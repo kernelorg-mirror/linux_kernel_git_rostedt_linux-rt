@@ -1472,114 +1472,89 @@ static int do_execve_common(const char *filename,
 	 * don't check setuid() return code.  Here we additionally recheck
 	 * whether NPROC limit is still exceeded.
 	 */
-	printk("%s:%d\n", __func__, __LINE__);
 	if ((current->flags & PF_NPROC_EXCEEDED) &&
 	    atomic_read(&current_user()->processes) > rlimit(RLIMIT_NPROC)) {
 		retval = -EAGAIN;
 		goto out_ret;
 	}
 
-	printk("%s:%d\n", __func__, __LINE__);
 	/* We're below the limit (still or again), so we don't want to make
 	 * further execve() calls fail. */
 	current->flags &= ~PF_NPROC_EXCEEDED;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = unshare_files(&displaced);
 	if (retval)
 		goto out_ret;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = -ENOMEM;
 	bprm = kzalloc(sizeof(*bprm), GFP_KERNEL);
 	if (!bprm)
 		goto out_files;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = prepare_bprm_creds(bprm);
 	if (retval)
 		goto out_free;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = check_unsafe_exec(bprm);
 	if (retval < 0)
 		goto out_free;
 	clear_in_exec = retval;
 	current->in_execve = 1;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	file = open_exec(filename);
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = PTR_ERR(file);
 	if (IS_ERR(file))
 		goto out_unmark;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	sched_exec();
-	printk("%s:%d\n", __func__, __LINE__);
 
 	bprm->file = file;
 	bprm->filename = filename;
 	bprm->interp = filename;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = bprm_mm_init(bprm);
 	if (retval)
 		goto out_file;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	bprm->argc = count(argv, MAX_ARG_STRINGS);
 	if ((retval = bprm->argc) < 0)
 		goto out;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	bprm->envc = count(envp, MAX_ARG_STRINGS);
-	printk("%s:%d\n", __func__, __LINE__);
 	if ((retval = bprm->envc) < 0)
 		goto out;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = prepare_binprm(bprm);
 	if (retval < 0)
 		goto out;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = copy_strings_kernel(1, &bprm->filename, bprm);
 	if (retval < 0)
 		goto out;
 
 	bprm->exec = bprm->p;
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = copy_strings(bprm->envc, envp, bprm);
 	if (retval < 0)
 		goto out;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	retval = copy_strings(bprm->argc, argv, bprm);
 	if (retval < 0)
 		goto out;
-	printk("%s:%d\n", __func__, __LINE__);
 
 	retval = search_binary_handler(bprm);
 	if (retval < 0)
 		goto out;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
-	printk("%s:%d\n", __func__, __LINE__);
 	acct_update_integrals(current);
-	printk("%s:%d\n", __func__, __LINE__);
 	free_bprm(bprm);
-	printk("%s:%d\n", __func__, __LINE__);
 	if (displaced)
 		put_files_struct(displaced);
-	printk("%s:%d\n", __func__, __LINE__);
 	return retval;
 
 out:
-	printk("%s:%d\n", __func__, __LINE__);
 	if (bprm->mm) {
 		acct_arg_size(bprm, 0);
 		mmput(bprm->mm);
@@ -1612,7 +1587,6 @@ int do_execve(const char *filename,
 {
 	struct user_arg_ptr argv = { .ptr.native = __argv };
 	struct user_arg_ptr envp = { .ptr.native = __envp };
-	printk("%s:%d\n", __func__, __LINE__);
 	return do_execve_common(filename, argv, envp);
 }
 

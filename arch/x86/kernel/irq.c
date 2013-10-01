@@ -636,6 +636,7 @@ static void __native_irq_enable(void *ip)
 			once = 1;
 			raw_native_irq_disable();
 			lazy_irq_add_temp();
+			printk("FAILED HERE %s %d\n", __func__, __LINE__);
 			show_lazy_irq_flags();
 			printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
 			printk("raw=%lx\n", raw_native_save_fl());
@@ -647,6 +648,8 @@ static void __native_irq_enable(void *ip)
 	if (!once && !(raw_native_save_fl() & X86_EFLAGS_IF)) {
 		once = 1;
 		raw_native_irq_enable();
+		lazy_irq_add_temp();
+		printk("FAILED HERE %s %d\n", __func__, __LINE__);
 		show_lazy_irq_flags();
 		printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
 		printk("raw=%lx\n", raw_native_save_fl());
