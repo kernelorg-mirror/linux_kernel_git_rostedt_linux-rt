@@ -1058,7 +1058,9 @@ END(interrupt)
 	 * We treat the trap like a normal interrupt.
 	 */
 	.macro SOFT_DISABLE_TRAP_ENTRY
-	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+	testl $(~((1 << LAZY_IRQ_REAL_DISABLE_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
+	jne 1f
+	addq  $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
 
 	/* If interrupts are soft disabled, then make eflags disabled too */
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
@@ -1068,7 +1070,9 @@ END(interrupt)
 	.endm
 
 	.macro SOFT_DISABLE_TRAP_EXIT
-	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+	/* Hard disabled? Do nothing */
+	testl $(~((1 << LAZY_IRQ_TEMP_DISABLED_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
+	jne 1f
 
 	/* Soft disabled? */
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
@@ -1079,15 +1083,11 @@ END(interrupt)
 	 * keep interrupts disabled, otherwise enabled them.
 	 */
 
+#if 0
 	/* Interrupt triggered? */
 	testl $-1, PER_CPU_VAR(lazy_irq_func)
 	jne 1f
-
-	movq PER_CPU_VAR(lazy_irq_disabled_flags), %rax
-	shrq $LAZY_IRQ_REAL_DISABLE_BIT, %rax
-	/* nested? */
-	jne 1f
-
+#endif
 	/* Return with interrupts enabled */
 	orq $(1 << 9), EFLAGS(%rsp)
 1:
