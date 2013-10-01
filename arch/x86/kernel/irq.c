@@ -647,12 +647,12 @@ static void __native_irq_enable(void *ip)
 
 	if (!once && !(raw_native_save_fl() & X86_EFLAGS_IF)) {
 		once = 1;
-		raw_native_irq_enable();
 		lazy_irq_add_temp();
 		printk("FAILED HERE %s %d\n", __func__, __LINE__);
 		show_lazy_irq_flags();
 		printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
 		printk("raw=%lx\n", raw_native_save_fl());
+		raw_native_irq_enable();
 		BUG();
 	}
 	preempt_enable();
@@ -660,6 +660,17 @@ static void __native_irq_enable(void *ip)
 
 int lazy_irq_idle_enter(void)
 {
+	unsigned long flags;
+
+	flags = get_lazy_irq_flags();
+
+	/*
+	 * If interrupts are hard coded off, then simply let the
+	 * CPU do the work.
+	 */
+	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+		return 1;
+
 	/*
 	 * Note, if there's a pending interrupt, then on real hardware
 	 * when the x86_idle() is called, it would trigger immediately.
@@ -679,7 +690,7 @@ int lazy_irq_idle_enter(void)
 	}
 
 	/* Interrupts will be enabled exiting x86_idle() */
-	BUG_ON(!(get_lazy_irq_flags() & LAZY_IRQ_FL_IRQ_DISABLED));
+	BUG_ON(!(flags & LAZY_IRQ_FL_IRQ_DISABLED));
 	lazy_irq_sub_disable();
 	return 1;
 }
