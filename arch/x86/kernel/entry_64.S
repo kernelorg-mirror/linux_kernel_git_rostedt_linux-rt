@@ -1017,19 +1017,23 @@ END(interrupt)
 1:
 	.endm
 	
-	.macro SOFT_DISABLED_START func
+	.macro SOFT_DISABLED_CHECK func
+	/* If in userspace, interrupts are always enabled */
+	testl $3, 16(%rsp) /* CS is at offset 16 */
+	jne 1f
 	bt $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
 	jnc 1f
 	pushq $\func
 	jmp irq_is_disabled
 1:
-	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+	.endm
 
+	.macro SOFT_DISABLED_START
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+	.endm
 #if 0
 	LAZY_DEBUG 0
 #endif
-
-	.endm
 
 	.macro SOFT_DISABLED_DONE
 	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
@@ -1118,11 +1122,12 @@ irq_is_disabled:
 
 /* 0(%rsp): ~(interrupt number) */
 	.macro interrupt func
-	SOFT_DISABLED_START \func
+	SOFT_DISABLED_CHECK \func
 	/* reserve pt_regs for scratch regs and rbp */
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
+	SOFT_DISABLED_START
 	call \func
 	SOFT_DISABLED_DONE
 	.endm
