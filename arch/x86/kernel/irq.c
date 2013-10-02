@@ -427,28 +427,34 @@ unsigned long native_save_fl(void)
 }
 EXPORT_SYMBOL(native_save_fl);
 
+static inline lazy_irq_sub(unsigned long val)
+{
+	asm volatile ("subq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
+}
+
+static inline lazy_irq_add(unsigned long val)
+{
+	asm volatile ("addq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
+}
+
 static inline void lazy_irq_sub_temp(void)
 {
-	local_sub(LAZY_IRQ_FL_TEMP_DISABLE,
-		  &__get_cpu_var(lazy_irq_disabled_flags));
+	lazy_irq_sub(LAZY_IRQ_FL_TEMP_DISABLE);
 }
 
 static inline void lazy_irq_add_temp(void)
 {
-	local_add(LAZY_IRQ_FL_TEMP_DISABLE,
-		  &__get_cpu_var(lazy_irq_disabled_flags));
+	lazy_irq_add(LAZY_IRQ_FL_TEMP_DISABLE);
 }
 
 static inline void lazy_irq_sub_disable(void)
 {
-	local_sub(LAZY_IRQ_FL_DISABLED,
-		  &__get_cpu_var(lazy_irq_disabled_flags));
+	lazy_irq_sub(LAZY_IRQ_FL_DISABLED);
 }
 
 static inline void lazy_irq_add_disable(void)
 {
-	local_add(LAZY_IRQ_FL_DISABLED,
-		  &__get_cpu_var(lazy_irq_disabled_flags));
+	lazy_irq_add(LAZY_IRQ_FL_DISABLED);
 }
 
 static void __native_irq_disable(void *ip)
@@ -457,7 +463,6 @@ static void __native_irq_disable(void *ip)
 	unsigned long raw;
 	static int once;
 
-	preempt_disable();
 	flags = get_lazy_irq_flags();
 	raw = raw_native_save_fl();
 
@@ -466,7 +471,6 @@ static void __native_irq_disable(void *ip)
 		if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 			raw_native_irq_disable();
 		/* If native_flags are set, we already disabled preemption */
-		preempt_enable();
 		return;
 	}
 
@@ -581,7 +585,6 @@ static void __native_irq_enable(void *ip)
 		raw_native_irq_enable();
 		BUG();
 	}
-	preempt_enable();
 }
 
 int lazy_irq_idle_enter(void)
