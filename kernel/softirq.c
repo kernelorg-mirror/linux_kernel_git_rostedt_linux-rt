@@ -132,15 +132,10 @@ void local_bh_disable(void)
 
 EXPORT_SYMBOL(local_bh_disable);
 
-DECLARE_PER_CPU(local_t, lazy_irq_disabled_flags);
 static void __local_bh_enable(unsigned int cnt)
 {
 	WARN_ON_ONCE(in_irq());
-	if (WARN_ON_ONCE(!irqs_disabled())) {
-		unsigned long flags = local_read(&__raw_get_cpu_var(lazy_irq_disabled_flags));
-		printk("flags=%lx dis=%lx real_dis=%lx\n", flags,
-		       irqs_disabled(), raw_native_save_fl());
-	}
+	WARN_ON_ONCE(!irqs_disabled());
 
 	if (softirq_count() == cnt)
 		trace_softirqs_on(_RET_IP_);

@@ -362,8 +362,6 @@ static void __init setup_command_line(char *command_line)
 
 static __initdata DECLARE_COMPLETION(kthreadd_done);
 
-unsigned long lazy_irq_flags(void);
-
 static noinline void __init_refok rest_init(void)
 {
 	int pid;
@@ -374,30 +372,20 @@ static noinline void __init_refok rest_init(void)
 	 * the init task will end up wanting to create kthreads, which, if
 	 * we schedule it before we create kthreadd, will OOPS.
 	 */
-	printk("kthread create \n");
 	kernel_thread(kernel_init, NULL, CLONE_FS | CLONE_SIGHAND);
-	printk("%s:%d\n", __func__, __LINE__);
 	numa_default_policy();
-	printk("%s:%d\n", __func__, __LINE__);
 	pid = kernel_thread(kthreadd, NULL, CLONE_FS | CLONE_FILES);
-	printk("%s:%d\n", __func__, __LINE__);
 	rcu_read_lock();
-	printk("%s:%d\n", __func__, __LINE__);
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
-	printk("%s:%d\n", __func__, __LINE__);
 	rcu_read_unlock();
-	printk("%s:%d\n", __func__, __LINE__);
 	complete(&kthreadd_done);
-	printk("%s:%d\n", __func__, __LINE__);
 
 	/*
 	 * The boot idle thread must execute schedule()
 	 * at least once to get things moving:
 	 */
 	init_idle_bootup_task(current);
-	printk("schedule preempt disable %lx\n", lazy_irq_flags());
 	schedule_preempt_disabled();
-	printk("cpu start up\n");
 	/* Call into cpu_idle with preempt disabled */
 	cpu_startup_entry(CPUHP_ONLINE);
 }
@@ -560,9 +548,7 @@ asmlinkage void __init start_kernel(void)
 	radix_tree_init();
 	/* init some links before init_ISA_irqs() */
 	early_irq_init();
-	printk("INIT IRQS\n");
 	init_IRQ();
-	printk("IRQS INIT\n");
 	tick_init();
 	init_timers();
 	hrtimers_init();
@@ -828,20 +814,14 @@ static int __ref kernel_init(void *unused)
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
 	async_synchronize_full();
-	printk("%s:%d\n", __func__, __LINE__);
 	free_initmem();
 	mark_rodata_ro();
-	printk("%s:%d\n", __func__, __LINE__);
 	system_state = SYSTEM_RUNNING;
-	printk("%s:%d\n", __func__, __LINE__);
 	numa_default_policy();
-	printk("%s:%d\n", __func__, __LINE__);
 
 	flush_delayed_fput();
-	printk("%s:%d\n", __func__, __LINE__);
 
 	if (ramdisk_execute_command) {
-	printk("%s:%d\n", __func__, __LINE__);
 		if (!run_init_process(ramdisk_execute_command))
 			return 0;
 		pr_err("Failed to execute %s\n", ramdisk_execute_command);
@@ -853,21 +833,18 @@ static int __ref kernel_init(void *unused)
 	 * The Bourne shell can be used instead of init if we are
 	 * trying to recover a really broken machine.
 	 */
-	printk("%s:%d\n", __func__, __LINE__);
 	if (execute_command) {
 		if (!run_init_process(execute_command))
 			return 0;
 		pr_err("Failed to execute %s.  Attempting defaults...\n",
 			execute_command);
 	}
-	printk("%s:%d\n", __func__, __LINE__);
 	if (!run_init_process("/sbin/init") ||
 	    !run_init_process("/etc/init") ||
 	    !run_init_process("/bin/init") ||
 	    !run_init_process("/bin/sh"))
 		return 0;
 
-	printk("%s:%d\n", __func__, __LINE__);
 	panic("No init found.  Try passing init= option to kernel. "
 	      "See Linux Documentation/init.txt for guidance.");
 }
@@ -898,7 +875,6 @@ static noinline void __init kernel_init_freeable(void)
 	do_pre_smp_initcalls();
 	lockup_detector_init();
 
-	printk("SMP_INIT\n");
 	smp_init();
 	sched_init_smp();
 

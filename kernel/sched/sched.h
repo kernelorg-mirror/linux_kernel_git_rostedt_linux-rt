@@ -836,26 +836,6 @@ static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 #endif
 }
 
-DECLARE_PER_CPU(void *, lazy_irq_func);
-unsigned long lazy_irq_flags(void);
-DECLARE_PER_CPU(unsigned long, sdr_last);
-DECLARE_PER_CPU(unsigned long, sdr_flags1);
-DECLARE_PER_CPU(unsigned long, sdr_flags2);
-DECLARE_PER_CPU(unsigned long, sdr_raw_flags1);
-DECLARE_PER_CPU(unsigned long, sdr_raw_flags2);
-DECLARE_PER_CPU(struct task_struct *, sdr_task);
-DECLARE_PER_CPU(void *, sdr_func1);
-DECLARE_PER_CPU(void *, sdr_func2);
-DECLARE_PER_CPU(void *, sdr_func3);
-DECLARE_PER_CPU(void *, sdr_func4);
-DECLARE_PER_CPU(void *, sdr_func5);
-DECLARE_PER_CPU(void *, sdr_func6);
-DECLARE_PER_CPU(void *, sdr_func7);
-
-DECLARE_PER_CPU(unsigned long, sdr_flags3);
-DECLARE_PER_CPU(unsigned long, sdr_flags4);
-DECLARE_PER_CPU(unsigned long, sdr_flags5);
-DECLARE_PER_CPU(unsigned long, sdr_flags6);
 static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 {
 #ifdef CONFIG_SMP
@@ -878,7 +858,6 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 	 */
 	spin_acquire(&rq->lock.dep_map, 0, 0, _THIS_IP_);
 
-	this_cpu_write(sdr_func7, this_cpu_read(lazy_irq_func));
 	raw_spin_unlock_irq(&rq->lock);
 }
 

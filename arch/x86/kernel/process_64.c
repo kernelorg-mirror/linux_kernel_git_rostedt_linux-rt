@@ -54,8 +54,6 @@ asmlinkage extern void ret_from_fork(void);
 
 DEFINE_PER_CPU(unsigned long, old_rsp);
 
-void show_lazy_irq_flags(void);
-
 /* Prints also some state that isn't saved in the pt_regs */
 void __show_regs(struct pt_regs *regs, int all)
 {
@@ -103,8 +101,6 @@ void __show_regs(struct pt_regs *regs, int all)
 			es, cr0);
 	printk(KERN_DEFAULT "CR2: %016lx CR3: %016lx CR4: %016lx\n", cr2, cr3,
 			cr4);
-
-	show_lazy_irq_flags();
 
 	get_debugreg(d0, 0);
 	get_debugreg(d1, 1);
@@ -268,26 +264,6 @@ void start_thread_ia32(struct pt_regs *regs, u32 new_ip, u32 new_sp)
 }
 #endif
 
-unsigned long lazy_irq_flags(void);
-DECLARE_PER_CPU(void *, lazy_irq_func);
-DECLARE_PER_CPU(unsigned long, sdr_last);
-DECLARE_PER_CPU(unsigned long, sdr_flags1);
-DECLARE_PER_CPU(unsigned long, sdr_flags2);
-DECLARE_PER_CPU(unsigned long, sdr_raw_flags1);
-DECLARE_PER_CPU(unsigned long, sdr_raw_flags2);
-DECLARE_PER_CPU(struct task_struct *, sdr_task);
-DECLARE_PER_CPU(void *, sdr_func1);
-DECLARE_PER_CPU(void *, sdr_func2);
-DECLARE_PER_CPU(void *, sdr_func3);
-DECLARE_PER_CPU(void *, sdr_func4);
-DECLARE_PER_CPU(void *, sdr_func5);
-DECLARE_PER_CPU(void *, sdr_func6);
-DECLARE_PER_CPU(void *, sdr_func7);
-
-DECLARE_PER_CPU(unsigned long, sdr_flags3);
-DECLARE_PER_CPU(unsigned long, sdr_flags4);
-DECLARE_PER_CPU(unsigned long, sdr_flags5);
-DECLARE_PER_CPU(unsigned long, sdr_flags6);
 /*
  *	switch_to(x,y) should switch tasks from x to y.
  *
@@ -308,8 +284,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 	unsigned fsindex, gsindex;
 	fpu_switch_t fpu;
 
-	this_cpu_write(sdr_func4, this_cpu_read(lazy_irq_func));
-	this_cpu_write(sdr_flags4, raw_native_save_fl());
 	fpu = switch_fpu_prepare(prev_p, next_p, cpu);
 
 	/*
@@ -380,8 +354,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		wrmsrl(MSR_KERNEL_GS_BASE, next->gs);
 	prev->gsindex = gsindex;
 
-	this_cpu_write(sdr_func5, this_cpu_read(lazy_irq_func));
-	this_cpu_write(sdr_flags5, raw_native_save_fl());
 	switch_fpu_finish(next_p, fpu);
 
 	/*
@@ -402,8 +374,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		     task_thread_info(prev_p)->flags & _TIF_WORK_CTXSW_PREV))
 		__switch_to_xtra(prev_p, next_p, tss);
 
-	this_cpu_write(sdr_func6, this_cpu_read(lazy_irq_func));
-	this_cpu_write(sdr_flags6, raw_native_save_fl());
 	return prev_p;
 }
 
