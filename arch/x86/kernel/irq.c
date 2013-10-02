@@ -386,6 +386,16 @@ static inline unsigned long get_lazy_irq_flags(void)
 	return flags;
 }
 
+static inline void * get_lazy_irq_func(void)
+{
+	void *func;
+
+	asm volatile ("movq %%gs:lazy_irq_func, %0" : "=r"(func) :: );
+	return func;
+}
+
+void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw);
+
 __init static int init_lazy_irqs(void)
 {
 	int cpu;
@@ -427,12 +437,12 @@ unsigned long native_save_fl(void)
 }
 EXPORT_SYMBOL(native_save_fl);
 
-static inline lazy_irq_sub(unsigned long val)
+static inline void lazy_irq_sub(unsigned long val)
 {
 	asm volatile ("subq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
 }
 
-static inline lazy_irq_add(unsigned long val)
+static inline void lazy_irq_add(unsigned long val)
 {
 	asm volatile ("addq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
 }
@@ -457,11 +467,10 @@ static inline void lazy_irq_add_disable(void)
 	lazy_irq_add(LAZY_IRQ_FL_DISABLED);
 }
 
-static void __native_irq_disable(void *ip)
+void native_irq_disable(void)
 {
 	unsigned long flags;
 	unsigned long raw;
-	static int once;
 
 	flags = get_lazy_irq_flags();
 	raw = raw_native_save_fl();
@@ -474,23 +483,10 @@ static void __native_irq_disable(void *ip)
 		return;
 	}
 
-	if (!once && !(raw & X86_EFLAGS_IF)) {
- 		once = 1;
-		lazy_irq_add_temp();
-		printk("FAILED HERE %s %d\n", __func__, __LINE__);
-		printk("flags=%lx init_raw=%lx\n", flags, raw);
-		printk("raw=%lx\n", raw_native_save_fl());
-		raw_native_irq_enable();
-		BUG();
-	}
+	if (!(raw & X86_EFLAGS_IF))
+		lazy_irq_bug(__func__, __LINE__, flags, raw);
 
 	lazy_irq_add_disable();
-	/* Leave with preemption disabled */
-}
-
-void native_irq_disable(void)
-{
-	__native_irq_disable(__builtin_return_address(0));
 }
 EXPORT_SYMBOL(native_irq_disable);
 
@@ -515,12 +511,11 @@ static void lazy_irq_simulate(void *func)
 	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
 }
 
-static void __native_irq_enable(void *ip)
+void native_irq_enable(void)
 {
 	unsigned long flags;
 	unsigned long raw;
 	void *func;
-	static int once;
 
 	flags = get_lazy_irq_flags();
 	raw = raw_native_save_fl();
@@ -530,14 +525,15 @@ static void __native_irq_enable(void *ip)
 		return;
 
 	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT) {
-		BUG_ON_IRQS_ENABLED();
+		if (raw_native_save_fl() & X86_EFLAGS_IF)
+			lazy_irq_bug(__func__, __LINE__, flags, raw);
 		if (flags & LAZY_IRQ_FL_TEMP_DISABLE) {
 			lazy_irq_sub_temp();
 			if (flags & LAZY_IRQ_FL_DISABLED)
 				lazy_irq_sub_disable();
 		}
 
-		func = this_cpu_read(lazy_irq_func);
+		func = get_lazy_irq_func();
 		if (func)
 			lazy_irq_simulate(func); /* enables interrupts */
 		else
@@ -551,7 +547,7 @@ static void __native_irq_enable(void *ip)
 	 * where we enable the lazy irq but a interrupt comes in when
 	 * we do it and sets func.
 	 */
-	func = this_cpu_read(lazy_irq_func);
+	func = get_lazy_irq_func();
 
 	/*
 	 * At this moment we can be in one of two states.
@@ -563,29 +559,16 @@ static void __native_irq_enable(void *ip)
 	 *  about interrupts coming in now. Call native_simulate_irq()
 	 *  to do the nasty work.
 	 */
-	if (unlikely(func)) {
-		if (!once && raw_native_save_fl() & X86_EFLAGS_IF) {
-			once = 1;
-			raw_native_irq_disable();
-			lazy_irq_add_temp();
-			printk("FAILED HERE %s %d\n", __func__, __LINE__);
-			printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
-			printk("raw=%lx\n", raw_native_save_fl());
-			BUG();
-		}
+	if (func) {
+		if (raw_native_save_fl() & X86_EFLAGS_IF)
+			lazy_irq_bug(__func__, __LINE__, flags, raw);
 		lazy_irq_simulate(func);
 	}
 
-	if (!once && !(raw_native_save_fl() & X86_EFLAGS_IF)) {
-		once = 1;
-		lazy_irq_add_temp();
-		printk("FAILED HERE %s %d\n", __func__, __LINE__);
-		printk("flags=%lx init_raw=%lx func=%pS\n", flags, raw, func);
-		printk("raw=%lx\n", raw_native_save_fl());
-		raw_native_irq_enable();
-		BUG();
-	}
+	if (!(raw_native_save_fl() & X86_EFLAGS_IF))
+		lazy_irq_bug(__func__, __LINE__, flags, raw);
 }
+EXPORT_SYMBOL(native_irq_enable);
 
 int lazy_irq_idle_enter(void)
 {
@@ -632,23 +615,30 @@ asmlinkage void lazy_irq_debug(long id, long err, void *func)
 	       this_cpu_read(lazy_irq_func));
 }
 
-void native_irq_enable(void)
-{
-	__native_irq_enable(__builtin_return_address(0));
-}
-EXPORT_SYMBOL(native_irq_enable);
-
 void native_restore_fl(unsigned long flags)
 {
-	if (flags & X86_EFLAGS_IF) {
-		__native_irq_enable(__builtin_return_address(0));
-	} else {
-		__native_irq_disable(__builtin_return_address(0));
-	}
+	if (flags & X86_EFLAGS_IF)
+		native_irq_enable();
+	else
+		native_irq_disable();
 }
 EXPORT_SYMBOL(native_restore_fl);
 
 typedef void (*irq_func_t)(struct pt_regs *regs);
+
+void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw)
+{
+	static int once;
+
+	once = 1;
+	lazy_irq_add_temp();
+	printk("FAILED HERE %s %d\n", file, line);
+	printk("flags=%lx init_raw=%lx\n", flags, raw);
+	printk("raw=%lx\n", raw_native_save_fl());
+	raw_native_irq_enable();
+	BUG();
+}
+EXPORT_SYMBOL(lazy_irq_bug);
 
 #endif /* CONFIG_LAZY_IRQ_DISABLE */
 
