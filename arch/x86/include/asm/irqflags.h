@@ -54,7 +54,7 @@ static inline void native_halt(void)
 	asm volatile("hlt": : :"memory");
 }
 
-#ifndef CONFIG_IRQ_SOFT_DISABLE
+#ifndef CONFIG_LAZY_IRQ_DISABLE
 #define native_save_fl() raw_native_save_fl()
 #define native_restore_fl(flags) raw_native_restore_fl(flags)
 #define native_irq_disable() raw_native_irq_disable()
@@ -64,7 +64,7 @@ unsigned long native_save_fl(void);
 void native_irq_disable(void);
 void native_irq_enable(void);
 void native_restore_fl(unsigned long flags);
-#endif /* CONFIG_IRQ_SOFT_DISABLE */
+#endif /* CONFIG_LAZY_IRQ_DISABLE */
 
 #endif /* !__ASSEMBLY__ */
 
@@ -220,11 +220,11 @@ static inline int arch_irqs_disabled(void)
 #endif /* __ASSEMBLY__ */
 
 #define LAZY_IRQ_DISABLED_BIT		0
-#define LAZY_IRQ_TEMP_DISABLED_BIT	1
+#define LAZY_IRQ_TEMP_DISABLE_BIT	1
 #define LAZY_IRQ_REAL_DISABLE_BIT	2
 
-#define LAZY_IRQ_FL_IRQ_DISABLED	(1 << LAZY_IRQ_DISABLED_BIT)
-#define LAZY_IRQ_FL_TEMP_DISABLED	(1 << LAZY_IRQ_TEMP_DISABLED_BIT)
+#define LAZY_IRQ_FL_DISABLED	(1 << LAZY_IRQ_DISABLED_BIT)
+#define LAZY_IRQ_FL_TEMP_DISABLE	(1 << LAZY_IRQ_TEMP_DISABLE_BIT)
 #define LAZY_IRQ_FL_REAL_DISABLE	(1 << LAZY_IRQ_REAL_DISABLE_BIT)
 
 #endif

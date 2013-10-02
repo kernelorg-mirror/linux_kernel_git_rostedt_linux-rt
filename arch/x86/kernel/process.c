@@ -293,7 +293,7 @@ void arch_cpu_idle_dead(void)
 	play_dead();
 }
 
-#ifdef CONFIG_IRQ_SOFT_DISABLE
+#ifdef CONFIG_LAZY_IRQ_DISABLE
 extern int lazy_irq_idle_enter(void);
 #else
 static inline lazy_irq_idle_enter(void)

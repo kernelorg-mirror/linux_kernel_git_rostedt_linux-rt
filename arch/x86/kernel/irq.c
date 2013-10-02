@@ -364,12 +364,12 @@ void fixup_irqs(void)
 }
 #endif
 
-#ifdef CONFIG_IRQ_SOFT_DISABLE
+#ifdef CONFIG_LAZY_IRQ_DISABLE
 #include <linux/percpu.h>
 #include <asm/local.h>
 
 /* Start out enabling and disabling for real */
-DEFINE_PER_CPU(local_t, lazy_irq_disabled_flags) = LOCAL_INIT(LAZY_IRQ_FL_TEMP_DISABLED);
+DEFINE_PER_CPU(local_t, lazy_irq_disabled_flags) = LOCAL_INIT(LAZY_IRQ_FL_TEMP_DISABLE);
 DEFINE_PER_CPU(void *, lazy_irq_func);
 DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
 
@@ -518,33 +518,33 @@ unsigned long native_save_fl(void)
 		printk("irq=%lx ret=%lx fl=%lx\n",
 		       flags, (~flags) & X86_EFLAGS_IF, raw_native_save_fl());
 	}
-	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 		return raw_native_save_fl();
-	return flags & LAZY_IRQ_FL_IRQ_DISABLED ? 0 : X86_EFLAGS_IF;
+	return flags & LAZY_IRQ_FL_DISABLED ? 0 : X86_EFLAGS_IF;
 }
 EXPORT_SYMBOL(native_save_fl);
 
 static inline void lazy_irq_sub_temp(void)
 {
-	local_sub(LAZY_IRQ_FL_TEMP_DISABLED,
+	local_sub(LAZY_IRQ_FL_TEMP_DISABLE,
 		  &__get_cpu_var(lazy_irq_disabled_flags));
 }
 
 static inline void lazy_irq_add_temp(void)
 {
-	local_add(LAZY_IRQ_FL_TEMP_DISABLED,
+	local_add(LAZY_IRQ_FL_TEMP_DISABLE,
 		  &__get_cpu_var(lazy_irq_disabled_flags));
 }
 
 static inline void lazy_irq_sub_disable(void)
 {
-	local_sub(LAZY_IRQ_FL_IRQ_DISABLED,
+	local_sub(LAZY_IRQ_FL_DISABLED,
 		  &__get_cpu_var(lazy_irq_disabled_flags));
 }
 
 static inline void lazy_irq_add_disable(void)
 {
-	local_add(LAZY_IRQ_FL_IRQ_DISABLED,
+	local_add(LAZY_IRQ_FL_DISABLED,
 		  &__get_cpu_var(lazy_irq_disabled_flags));
 }
 
@@ -560,7 +560,7 @@ static void __native_irq_disable(void *ip)
 
 	if (flags) {
 		/* Always disable for real not in lazy mode */
-		if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+		if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 			raw_native_irq_disable();
 		/* If native_flags are set, we already disabled preemption */
 		preempt_enable();
@@ -592,12 +592,12 @@ void native_irq_disable(void)
 EXPORT_SYMBOL(native_irq_disable);
 
 /**
- * native_simulate_irq - simulate an interrupt that triggered during soft disable
+ * native_simulate_irq - simulate an interrupt that triggered during lazy disable
  * @func: The interrupt function to call.
  * @orig_ax: The saved interrupt vector
  *
  * Defined in assembly, this function is used to simulate an interrupt
- * that happened while the irq soft disabling was in effect.
+ * that happened while the irq lazy disabling was in effect.
  *
  * Basically this will simulate the 
  */
@@ -626,11 +626,11 @@ static void __native_irq_enable(void *ip)
 	if (!flags)
 		return;
 
-	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT) {
+	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT) {
 		BUG_ON_IRQS_ENABLED();
-		if (flags & LAZY_IRQ_FL_TEMP_DISABLED) {
+		if (flags & LAZY_IRQ_FL_TEMP_DISABLE) {
 			lazy_irq_sub_temp();
-			if (flags & LAZY_IRQ_FL_IRQ_DISABLED)
+			if (flags & LAZY_IRQ_FL_DISABLED)
 				lazy_irq_sub_disable();
 		}
 
@@ -644,7 +644,7 @@ static void __native_irq_enable(void *ip)
 
 	lazy_irq_sub_disable();
 	/*
-	 * Grab func *after* enabling soft irqs, this prevents the race
+	 * Grab func *after* enabling lazy irqs, this prevents the race
 	 * where we enable the lazy irq but a interrupt comes in when
 	 * we do it and sets func.
 	 */
@@ -701,7 +701,7 @@ int lazy_irq_idle_enter(void)
 	 * If interrupts are hard coded off, then simply let the
 	 * CPU do the work.
 	 */
-	if (flags >> LAZY_IRQ_TEMP_DISABLED_BIT)
+	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 		return 1;
 
 	/*
@@ -723,7 +723,7 @@ int lazy_irq_idle_enter(void)
 	}
 
 	/* Interrupts will be enabled exiting x86_idle() */
-	BUG_ON(!(flags & LAZY_IRQ_FL_IRQ_DISABLED));
+	BUG_ON(!(flags & LAZY_IRQ_FL_DISABLED));
 	lazy_irq_sub_disable();
 	return 1;
 }
@@ -757,5 +757,5 @@ EXPORT_SYMBOL(native_restore_fl);
 
 typedef void (*irq_func_t)(struct pt_regs *regs);
 
-#endif /* CONFIG_IRQ_SOFT_DISABLE */
+#endif /* CONFIG_LAZY_IRQ_DISABLE */
 

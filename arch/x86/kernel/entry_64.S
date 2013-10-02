@@ -547,8 +547,8 @@ ENTRY(ret_from_fork)
 	pushq_cfi $0x0002
 	popfq_cfi				# reset kernel eflags
 
-#ifdef CONFIG_IRQ_SOFT_DISABLE
-	orq $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
+#ifdef CONFIG_LAZY_IRQ_DISABLE
+	orq $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 #endif
 
 	call schedule_tail			# rdi: 'prev' task parameter
@@ -977,7 +977,7 @@ END(irq_entries_start)
 END(interrupt)
 .previous
 
-#ifdef CONFIG_IRQ_SOFT_DISABLE
+#ifdef CONFIG_LAZY_IRQ_DISABLE
 	.macro LAZY_DEBUG int func=0
 	pushq %rdi
 	pushq %rsi
@@ -1017,7 +1017,7 @@ END(interrupt)
 1:
 	.endm
 	
-	.macro SOFT_DISABLED_CHECK func
+	.macro LAZY_DISABLED_CHECK func
 	/* If in userspace, interrupts are always enabled */
 	testl $3, 16(%rsp) /* CS is at offset 16 */
 	jne 1f
@@ -1028,14 +1028,14 @@ END(interrupt)
 1:
 	.endm
 
-	.macro SOFT_DISABLED_START
+	.macro LAZY_DISABLED_START
 	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 	.endm
 #if 0
 	LAZY_DEBUG 0
 #endif
 
-	.macro SOFT_DISABLED_DONE
+	.macro LAZY_DISABLED_DONE
 	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 	.endm
 
@@ -1057,10 +1057,10 @@ END(interrupt)
 	 * If interrupts are not soft disabled at the start of the trap.
 	 * We treat the trap like a normal interrupt.
 	 */
-	.macro SOFT_DISABLE_TRAP_ENTRY
+	.macro LAZY_DISABLE_TRAP_ENTRY
 	testl $(~((1 << LAZY_IRQ_REAL_DISABLE_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
 	jne 1f
-	addq  $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
+	addq  $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 
 	/* If interrupts are soft disabled, then make eflags disabled too */
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
@@ -1069,9 +1069,9 @@ END(interrupt)
 1:
 	.endm
 
-	.macro SOFT_DISABLE_TRAP_EXIT
+	.macro LAZY_DISABLE_TRAP_EXIT
 	/* Hard disabled? Do nothing */
-	testl $(~((1 << LAZY_IRQ_TEMP_DISABLED_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
+	testl $(~((1 << LAZY_IRQ_TEMP_DISABLE_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
 	jne 1f
 
 	/* Soft disabled? */
@@ -1103,13 +1103,13 @@ irq_is_disabled:
 	andq $~(1 << 9), 16(%rsp)	/* keep irqs disabled */
 	jmp irq_return
 #else
-	.macro SOFT_DISABLED func
+	.macro LAZY_DISABLED func
 	call \func
 	.endm
-#define SOFT_DISABLED_START
-#define SOFT_DISABLED_DONE
-#define SOFT_DISABLE_TRAP_ENTRY
-#define SOFT_DISABLE_TRAP_EXIT
+#define LAZY_DISABLED_START
+#define LAZY_DISABLED_DONE
+#define LAZY_DISABLE_TRAP_ENTRY
+#define LAZY_DISABLE_TRAP_EXIT
 #endif
 
 /*
@@ -1122,14 +1122,14 @@ irq_is_disabled:
 
 /* 0(%rsp): ~(interrupt number) */
 	.macro interrupt func
-	SOFT_DISABLED_CHECK \func
+	LAZY_DISABLED_CHECK \func
 	/* reserve pt_regs for scratch regs and rbp */
 	subq $ORIG_RAX-RBP, %rsp
 	CFI_ADJUST_CFA_OFFSET ORIG_RAX-RBP
 	SAVE_ARGS_IRQ
-	SOFT_DISABLED_START
+	LAZY_DISABLED_START
 	call \func
-	SOFT_DISABLED_DONE
+	LAZY_DISABLED_DONE
 	.endm
 
 /*
@@ -1266,10 +1266,10 @@ ENTRY(retint_kernel)
 	jnc  retint_restore_args
 	bt   $9,EFLAGS-ARGOFFSET(%rsp)	/* interrupts off? */
 	jnc  retint_restore_args
-#ifdef CONFIG_IRQ_SOFT_DISABLE
+#ifdef CONFIG_LAZY_IRQ_DISABLE
 	bt $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
 	jc  retint_restore_args
-	orq $LAZY_IRQ_FL_TEMP_DISABLED, PER_CPU_VAR(lazy_irq_disabled_flags)
+	orq $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 #endif
 	call preempt_schedule_irq
 	jmp exit_intr
@@ -1379,9 +1379,9 @@ ENTRY(\sym)
 	DEFAULT_FRAME 0
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
-	SOFT_DISABLE_TRAP_ENTRY
+	LAZY_DISABLE_TRAP_ENTRY
 	call \do_sym
-	SOFT_DISABLE_TRAP_EXIT
+	LAZY_DISABLE_TRAP_EXIT
 	jmp error_exit		/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1399,9 +1399,9 @@ ENTRY(\sym)
 	TRACE_IRQS_OFF
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
-	SOFT_DISABLE_TRAP_ENTRY
+	LAZY_DISABLE_TRAP_ENTRY
 	call \do_sym
-	SOFT_DISABLE_TRAP_EXIT
+	LAZY_DISABLE_TRAP_EXIT
 	jmp paranoid_exit	/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1421,9 +1421,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi		/* pt_regs pointer */
 	xorl %esi,%esi		/* no error code */
 	subq $EXCEPTION_STKSZ, INIT_TSS_IST(\ist)
-	SOFT_DISABLE_TRAP_ENTRY
+	LAZY_DISABLE_TRAP_ENTRY
 	call \do_sym
-	SOFT_DISABLE_TRAP_EXIT
+	LAZY_DISABLE_TRAP_EXIT
 	addq $EXCEPTION_STKSZ, INIT_TSS_IST(\ist)
 	jmp paranoid_exit	/* %ebx: no swapgs flag */
 	CFI_ENDPROC
@@ -1442,9 +1442,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi			/* pt_regs pointer */
 	movq ORIG_RAX(%rsp),%rsi	/* get error code */
 	movq $-1,ORIG_RAX(%rsp)		/* no syscall to restart */
-	SOFT_DISABLE_TRAP_ENTRY
+	LAZY_DISABLE_TRAP_ENTRY
 	call \do_sym
-	SOFT_DISABLE_TRAP_EXIT
+	LAZY_DISABLE_TRAP_EXIT
 	jmp error_exit			/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1464,9 +1464,9 @@ ENTRY(\sym)
 	movq %rsp,%rdi			/* pt_regs pointer */
 	movq ORIG_RAX(%rsp),%rsi	/* get error code */
 	movq $-1,ORIG_RAX(%rsp)		/* no syscall to restart */
-	SOFT_DISABLE_TRAP_ENTRY
+	LAZY_DISABLE_TRAP_ENTRY
 	call \do_sym
-	SOFT_DISABLE_TRAP_EXIT
+	LAZY_DISABLE_TRAP_EXIT
 	jmp paranoid_exit		/* %ebx: no swapgs flag */
 	CFI_ENDPROC
 END(\sym)
@@ -1801,7 +1801,7 @@ ENTRY(error_exit)
 	CFI_ENDPROC
 END(error_exit)
 
-#ifdef CONFIG_IRQ_SOFT_DISABLE
+#ifdef CONFIG_LAZY_IRQ_DISABLE
 /*
  * Called with interrupts disabled.
  * Returns enabling interrupts
@@ -1849,7 +1849,7 @@ ENTRY(native_simulate_irq)
 	jmp ret_from_intr
 	CFI_ENDPROC
 END(native_simulate_irq)
-#endif /* CONFIG_IRQ_SOFT_DISABLE */
+#endif /* CONFIG_LAZY_IRQ_DISABLE */
 
 /*
  * Test if a given stack is an NMI stack or not.
