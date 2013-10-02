@@ -372,6 +372,9 @@ void fixup_irqs(void)
 DEFINE_PER_CPU(local_t, lazy_irq_disabled_flags) = LOCAL_INIT(LAZY_IRQ_FL_TEMP_DISABLE);
 DEFINE_PER_CPU(void *, lazy_irq_func);
 DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
+EXPORT_SYMBOL(lazy_irq_disabled_flags);
+EXPORT_SYMBOL(lazy_irq_func);
+EXPORT_SYMBOL(lazy_irq_vector);
 
 #define BUG_ON_IRQS_ENABLED()					\
 	do {							\
@@ -398,166 +401,6 @@ unsigned long lazy_irq_flags(void)
 	return get_lazy_irq_flags();
 }
 
-static inline unsigned long get_lazy_irq_flags(void)
-{
-	unsigned long flags;
-
-	asm volatile ("movq %%gs:lazy_irq_disabled_flags, %0" : "=r"(flags) :: );
-	return flags;
-}
-
-static inline void * get_lazy_irq_func(void)
-{
-	void *func;
-
-	asm volatile ("movq %%gs:lazy_irq_func, %0" : "=r"(func) :: );
-	return func;
-}
-
-void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw);
-
-unsigned long native_save_fl(void)
-{
-	unsigned long flags;
-
-	/*
-	 * It might be possible that if irqs are fully enabled
-	 * we could migrate. But the result of this operation
-	 * will be the same regardless if we move from one
-	 * CPU to another.
-	 *
-	 * Inverse the result, as the test checks if
-	 * NATIVE_IRQ_DISABLED is clear, not set.
-	 */
-	flags = get_lazy_irq_flags();
-
-	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
-		return raw_native_save_fl();
-	return flags & LAZY_IRQ_FL_DISABLED ? 0 : X86_EFLAGS_IF;
-}
-EXPORT_SYMBOL(native_save_fl);
-
-static inline void lazy_irq_sub(unsigned long val)
-{
-	asm volatile ("subq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
-}
-
-static inline void lazy_irq_add(unsigned long val)
-{
-	asm volatile ("addq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
-}
-
-static inline void lazy_irq_sub_temp(void)
-{
-	lazy_irq_sub(LAZY_IRQ_FL_TEMP_DISABLE);
-}
-
-static inline void lazy_irq_add_temp(void)
-{
-	lazy_irq_add(LAZY_IRQ_FL_TEMP_DISABLE);
-}
-
-static inline void lazy_irq_sub_disable(void)
-{
-	lazy_irq_sub(LAZY_IRQ_FL_DISABLED);
-}
-
-static inline void lazy_irq_add_disable(void)
-{
-	lazy_irq_add(LAZY_IRQ_FL_DISABLED);
-}
-
-void native_irq_disable(void)
-{
-	unsigned long flags;
-	unsigned long raw;
-
-	flags = get_lazy_irq_flags();
-	raw = raw_native_save_fl();
-
-	if (flags) {
-		/* Always disable for real not in lazy mode */
-		if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
-			raw_native_irq_disable();
-		/* If native_flags are set, we already disabled preemption */
-		return;
-	}
-
-	if (!(raw & X86_EFLAGS_IF))
-		lazy_irq_bug(__func__, __LINE__, flags, raw);
-
-	lazy_irq_add_disable();
-}
-EXPORT_SYMBOL(native_irq_disable);
-
-void native_irq_enable(void)
-{
-	unsigned long flags;
-	unsigned long raw;
-	void *func;
-
-	flags = get_lazy_irq_flags();
-	raw = raw_native_save_fl();
-
-	/* Do nothing if already enabled */
-	if (!flags)
-		return;
-
-	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT) {
-		if (raw_native_save_fl() & X86_EFLAGS_IF)
-			lazy_irq_bug(__func__, __LINE__, flags, raw);
-		if (flags & LAZY_IRQ_FL_TEMP_DISABLE) {
-			lazy_irq_sub_temp();
-			if (flags & LAZY_IRQ_FL_DISABLED)
-				lazy_irq_sub_disable();
-		}
-
-		func = get_lazy_irq_func();
-		if (func)
-			lazy_irq_simulate(func); /* enables interrupts */
-		else
-			raw_native_irq_enable();
-		return;
-	}
-
-	lazy_irq_sub_disable();
-	/*
-	 * Grab func *after* enabling lazy irqs, this prevents the race
-	 * where we enable the lazy irq but a interrupt comes in when
-	 * we do it and sets func.
-	 */
-	func = get_lazy_irq_func();
-
-	/*
-	 * At this moment we can be in one of two states.
-	 * Either native_flags == 0 or native_flags == triggered
-	 * If zero, and an interrupt comes in, then it will simply
-	 *  process the interrupt.
-	 * If it is triggered, then the interrupt returned with
-	 *  real interrupts disabled, and we do not need to worry
-	 *  about interrupts coming in now. Call native_simulate_irq()
-	 *  to do the nasty work.
-	 */
-	if (func) {
-		if (raw_native_save_fl() & X86_EFLAGS_IF)
-			lazy_irq_bug(__func__, __LINE__, flags, raw);
-		lazy_irq_simulate(func);
-	}
-
-	if (!(raw_native_save_fl() & X86_EFLAGS_IF))
-		lazy_irq_bug(__func__, __LINE__, flags, raw);
-}
-EXPORT_SYMBOL(native_irq_enable);
-
-void native_restore_fl(unsigned long flags)
-{
-	if (flags & X86_EFLAGS_IF)
-		native_irq_enable();
-	else
-		native_irq_disable();
-}
-EXPORT_SYMBOL(native_restore_fl);
-
 /**
  * native_simulate_irq - simulate an interrupt that triggered during lazy disable
  * @func: The interrupt function to call.
@@ -570,7 +413,7 @@ EXPORT_SYMBOL(native_restore_fl);
  */
 extern void native_simulate_irq(void *func, unsigned long orig_ax);
 
-static void lazy_irq_simulate(void *func)
+void lazy_irq_simulate(void *func)
 {
 	this_cpu_write(lazy_irq_func, NULL);
 
@@ -578,6 +421,7 @@ static void lazy_irq_simulate(void *func)
 
 	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
 }
+EXPORT_SYMBOL(lazy_irq_simulate);
 
 int lazy_irq_idle_enter(void)
 {
