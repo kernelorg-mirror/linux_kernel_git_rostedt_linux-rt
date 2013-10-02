@@ -380,7 +380,10 @@ DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
 
 static inline unsigned long get_lazy_irq_flags(void)
 {
-	return local_read(&__raw_get_cpu_var(lazy_irq_disabled_flags));
+	unsigned long flags;
+
+	asm volatile ("movq %%gs:lazy_irq_disabled_flags, %0" : "=r"(flags) :: );
+	return flags;
 }
 
 __init static int init_lazy_irqs(void)
@@ -402,7 +405,6 @@ unsigned long lazy_irq_flags(void)
 {
 	return get_lazy_irq_flags();
 }
-
 
 unsigned long native_save_fl(void)
 {
