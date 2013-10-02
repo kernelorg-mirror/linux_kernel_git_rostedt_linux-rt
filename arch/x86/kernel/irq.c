@@ -378,24 +378,6 @@ DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
 		BUG_ON(raw_native_save_fl() & X86_EFLAGS_IF);	\
 	} while (0)
 
-static inline unsigned long get_lazy_irq_flags(void)
-{
-	unsigned long flags;
-
-	asm volatile ("movq %%gs:lazy_irq_disabled_flags, %0" : "=r"(flags) :: );
-	return flags;
-}
-
-static inline void * get_lazy_irq_func(void)
-{
-	void *func;
-
-	asm volatile ("movq %%gs:lazy_irq_func, %0" : "=r"(func) :: );
-	return func;
-}
-
-void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw);
-
 __init static int init_lazy_irqs(void)
 {
 	int cpu;
@@ -415,6 +397,24 @@ unsigned long lazy_irq_flags(void)
 {
 	return get_lazy_irq_flags();
 }
+
+static inline unsigned long get_lazy_irq_flags(void)
+{
+	unsigned long flags;
+
+	asm volatile ("movq %%gs:lazy_irq_disabled_flags, %0" : "=r"(flags) :: );
+	return flags;
+}
+
+static inline void * get_lazy_irq_func(void)
+{
+	void *func;
+
+	asm volatile ("movq %%gs:lazy_irq_func, %0" : "=r"(func) :: );
+	return func;
+}
+
+void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw);
 
 unsigned long native_save_fl(void)
 {
@@ -490,27 +490,6 @@ void native_irq_disable(void)
 }
 EXPORT_SYMBOL(native_irq_disable);
 
-/**
- * native_simulate_irq - simulate an interrupt that triggered during lazy disable
- * @func: The interrupt function to call.
- * @orig_ax: The saved interrupt vector
- *
- * Defined in assembly, this function is used to simulate an interrupt
- * that happened while the irq lazy disabling was in effect.
- *
- * Basically this will simulate the 
- */
-extern void native_simulate_irq(void *func, unsigned long orig_ax);
-
-static void lazy_irq_simulate(void *func)
-{
-	this_cpu_write(lazy_irq_func, NULL);
-
-	BUG_ON_IRQS_ENABLED();
-
-	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
-}
-
 void native_irq_enable(void)
 {
 	unsigned long flags;
@@ -570,6 +549,36 @@ void native_irq_enable(void)
 }
 EXPORT_SYMBOL(native_irq_enable);
 
+void native_restore_fl(unsigned long flags)
+{
+	if (flags & X86_EFLAGS_IF)
+		native_irq_enable();
+	else
+		native_irq_disable();
+}
+EXPORT_SYMBOL(native_restore_fl);
+
+/**
+ * native_simulate_irq - simulate an interrupt that triggered during lazy disable
+ * @func: The interrupt function to call.
+ * @orig_ax: The saved interrupt vector
+ *
+ * Defined in assembly, this function is used to simulate an interrupt
+ * that happened while the irq lazy disabling was in effect.
+ *
+ * Basically this will simulate the 
+ */
+extern void native_simulate_irq(void *func, unsigned long orig_ax);
+
+static void lazy_irq_simulate(void *func)
+{
+	this_cpu_write(lazy_irq_func, NULL);
+
+	BUG_ON_IRQS_ENABLED();
+
+	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
+}
+
 int lazy_irq_idle_enter(void)
 {
 	unsigned long flags;
@@ -614,15 +623,6 @@ asmlinkage void lazy_irq_debug(long id, long err, void *func)
 	       this_cpu_read(lazy_irq_vector),
 	       this_cpu_read(lazy_irq_func));
 }
-
-void native_restore_fl(unsigned long flags)
-{
-	if (flags & X86_EFLAGS_IF)
-		native_irq_enable();
-	else
-		native_irq_disable();
-}
-EXPORT_SYMBOL(native_restore_fl);
 
 typedef void (*irq_func_t)(struct pt_regs *regs);
 
