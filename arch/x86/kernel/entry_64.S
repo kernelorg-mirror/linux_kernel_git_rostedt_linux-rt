@@ -1058,7 +1058,7 @@ END(interrupt)
 	 * We treat the trap like a normal interrupt.
 	 */
 	.macro LAZY_DISABLE_TRAP_ENTRY
-	testl $(~((1 << LAZY_IRQ_REAL_DISABLE_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
+	testl $(~(LAZY_IRQ_FL_TEMP_DISABLE-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
 	jne 1f
 	addq  $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 
@@ -1071,26 +1071,30 @@ END(interrupt)
 
 	.macro LAZY_DISABLE_TRAP_EXIT
 	/* Hard disabled? Do nothing */
-	testl $(~((1 << LAZY_IRQ_TEMP_DISABLE_BIT)-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
-	jne 1f
+	testl $(~(LAZY_IRQ_FL_REAL_DISABLE-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
+	jne 2f
 
+	bt  $LAZY_IRQ_TEMP_DISABLE_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
+	jnc 1f
+	subq  $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
+
+1:
 	/* Soft disabled? */
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
-	jnc 1f
+	jnc 2f
 
 	/*
 	 * If we are nested or there's a pending interrupt,
 	 * keep interrupts disabled, otherwise enabled them.
 	 */
 
-#if 0
 	/* Interrupt triggered? */
 	testl $-1, PER_CPU_VAR(lazy_irq_func)
-	jne 1f
-#endif
+	jne 2f
+
 	/* Return with interrupts enabled */
 	orq $(1 << 9), EFLAGS(%rsp)
-1:
+2:
 	.endm
 
 irq_is_disabled:
@@ -1267,8 +1271,8 @@ ENTRY(retint_kernel)
 	bt   $9,EFLAGS-ARGOFFSET(%rsp)	/* interrupts off? */
 	jnc  retint_restore_args
 #ifdef CONFIG_LAZY_IRQ_DISABLE
-	bt $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
-	jc  retint_restore_args
+	cmpl $0,PER_CPU_VAR(lazy_irq_on)
+	jnz  retint_restore_args
 	orq $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 #endif
 	call preempt_schedule_irq
@@ -2081,7 +2085,9 @@ end_repeat_nmi:
 	/* paranoidentry do_nmi, 0; without TRACE_IRQS_OFF */
 	movq %rsp,%rdi
 	movq $-1,%rsi
+	LAZY_DISABLED_START
 	call do_nmi
+	LAZY_DISABLED_DONE
 
 	/* Did the NMI take a page fault? Restore cr2 if it did */
 	movq %cr2, %rcx

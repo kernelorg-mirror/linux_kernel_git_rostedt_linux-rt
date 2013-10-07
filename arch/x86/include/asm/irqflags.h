@@ -12,6 +12,13 @@
 #define LAZY_IRQ_FL_REAL_DISABLE	(1 << LAZY_IRQ_REAL_DISABLE_BIT)
 
 #ifndef __ASSEMBLY__
+#include <linux/kernel.h>
+
+void update_last_hard_enable(unsigned long addr);
+void update_last_soft_enable(unsigned long addr);
+void update_last_hard_disable(unsigned long addr);
+void update_last_soft_disable(unsigned long addr);
+
 /*
  * Interrupt control:
  */
@@ -36,6 +43,13 @@ static inline unsigned long raw_native_save_fl(void)
 
 static inline void raw_native_restore_fl(unsigned long flags)
 {
+	if ((raw_native_save_fl() ^ flags) & X86_EFLAGS_IF) {
+		if (flags & X86_EFLAGS_IF)
+			update_last_hard_enable(_THIS_IP_);
+		else
+			update_last_hard_disable(_THIS_IP_);
+	}
+
 	asm volatile("push %0 ; popf"
 		     : /* no output */
 		     :"g" (flags)
@@ -45,10 +59,12 @@ static inline void raw_native_restore_fl(unsigned long flags)
 static inline void raw_native_irq_disable(void)
 {
 	asm volatile("cli": : :"memory");
+	update_last_hard_disable(_THIS_IP_);
 }
 
 static inline void raw_native_irq_enable(void)
 {
+	update_last_hard_enable(_THIS_IP_);
 	asm volatile("sti": : :"memory");
 }
 
@@ -69,6 +85,9 @@ static inline void native_halt(void)
 #define native_irq_enable() raw_native_irq_enable()
 #else
 #include <linux/compiler.h>
+
+void do_preempt_disable(void);
+void do_preempt_enable(void);
 
 void lazy_irq_simulate(void *func);
 
@@ -94,7 +113,6 @@ static inline unsigned long native_save_fl(void)
 {
 	unsigned long flags;
 
-	barrier();
 	/*
 	 * It might be possible that if irqs are fully enabled
 	 * we could migrate. But the result of this operation
@@ -109,12 +127,15 @@ static inline unsigned long native_save_fl(void)
 	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 		return raw_native_save_fl();
 
-	barrier();
 	return flags & LAZY_IRQ_FL_DISABLED ? 0 : X86_EFLAGS_IF;
 }
 
 static inline void lazy_irq_sub(unsigned long val)
 {
+	if (val > get_lazy_irq_flags())
+		lazy_irq_bug(__func__, __LINE__,
+			     get_lazy_irq_flags(), raw_native_save_fl());
+
 	asm volatile ("subq %0, %%gs:lazy_irq_disabled_flags" : : "r"(val) : "memory");
 }
 
@@ -135,11 +156,13 @@ static inline void lazy_irq_add_temp(void)
 
 static inline void lazy_irq_sub_disable(void)
 {
+	update_last_soft_enable(_THIS_IP_);
 	lazy_irq_sub(LAZY_IRQ_FL_DISABLED);
 }
 
 static inline void lazy_irq_add_disable(void)
 {
+	update_last_soft_disable(_THIS_IP_);
 	lazy_irq_add(LAZY_IRQ_FL_DISABLED);
 }
 
@@ -148,7 +171,7 @@ static inline void native_irq_disable(void)
 	unsigned long flags;
 	unsigned long raw;
 
-	barrier();
+	do_preempt_disable();
 	flags = get_lazy_irq_flags();
 	raw = raw_native_save_fl();
 
@@ -157,6 +180,7 @@ static inline void native_irq_disable(void)
 		if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 			raw_native_irq_disable();
 		/* If native_flags are set, we already disabled preemption */
+		do_preempt_enable();
 		return;
 	}
 
@@ -164,41 +188,44 @@ static inline void native_irq_disable(void)
 		lazy_irq_bug(__func__, __LINE__, flags, raw);
 
 	lazy_irq_add_disable();
-	barrier();
+	/* Leave with preemption disabled */
 }
 
 static inline void native_irq_enable(void)
 {
 	unsigned long flags;
 	unsigned long raw;
-	void *func;
-
-	barrier();
+	void *func = NULL;
 
 	flags = get_lazy_irq_flags();
 	raw = raw_native_save_fl();
 
 	/* Do nothing if already enabled */
 	if (!flags)
-		return;
+		goto out;
 
 	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT) {
 		if (raw_native_save_fl() & X86_EFLAGS_IF)
 			lazy_irq_bug(__func__, __LINE__, flags, raw);
 		if (flags & LAZY_IRQ_FL_TEMP_DISABLE) {
 			lazy_irq_sub_temp();
-			if (flags & LAZY_IRQ_FL_DISABLED)
+			flags = get_lazy_irq_flags();
+			if (flags == LAZY_IRQ_FL_DISABLED)
 				lazy_irq_sub_disable();
 		}
+		if (get_lazy_irq_flags() & LAZY_IRQ_FL_DISABLED)
+			lazy_irq_bug(__func__, __LINE__, flags, raw);
 
 		func = get_lazy_irq_func();
 		if (func)
 			lazy_irq_simulate(func); /* enables interrupts */
 		else
 			raw_native_irq_enable();
-		return;
+		goto out;
 	}
 
+	if (LAZY_IRQ_FL_DISABLED > get_lazy_irq_flags())
+		lazy_irq_bug(__func__, __LINE__, flags, raw);
 	lazy_irq_sub_disable();
 	/*
 	 * Grab func *after* enabling lazy irqs, this prevents the race
@@ -223,8 +250,12 @@ static inline void native_irq_enable(void)
 		lazy_irq_simulate(func);
 	}
 
-	if (!(raw_native_save_fl() & X86_EFLAGS_IF))
+	do_preempt_enable();
+out:
+	if (!(raw_native_save_fl() & X86_EFLAGS_IF)) {
+		printk("func=%pS flags=%lx\n", func, get_lazy_irq_flags());
 		lazy_irq_bug(__func__, __LINE__, flags, raw);
+	}
 
 	barrier();
 }

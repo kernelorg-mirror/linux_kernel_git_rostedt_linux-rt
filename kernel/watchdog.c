@@ -323,6 +323,8 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		else
 			dump_stack();
 
+		trigger_all_cpu_backtrace();
+
 		if (softlockup_panic)
 			panic("softlockup: hung tasks");
 		__this_cpu_write(soft_watchdog_warn, true);
@@ -339,14 +341,23 @@ static void watchdog_set_prio(unsigned int policy, unsigned int prio)
 	sched_setscheduler(current, policy, &param);
 }
 
+void print_lazy_irq(int line);
+void print_lazy_debug(void);
 static void watchdog_enable(unsigned int cpu)
 {
 	struct hrtimer *hrtimer = &__raw_get_cpu_var(watchdog_hrtimer);
 
+	print_lazy_debug();
+	print_lazy_irq(__LINE__);
+	set_current_state(TASK_INTERRUPTIBLE);
+	schedule_timeout(1);
+	printk("awake!\n");
+	print_lazy_irq(__LINE__);
 	/* kick off the timer for the hardlockup detector */
 	hrtimer_init(hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer->function = watchdog_timer_fn;
 
+	print_lazy_irq(__LINE__);
 	/* Enable the perf event */
 	watchdog_nmi_enable(cpu);
 
@@ -354,6 +365,7 @@ static void watchdog_enable(unsigned int cpu)
 	hrtimer_start(hrtimer, ns_to_ktime(sample_period),
 		      HRTIMER_MODE_REL_PINNED);
 
+	print_lazy_irq(__LINE__);
 	/* initialize timestamp */
 	watchdog_set_prio(SCHED_FIFO, MAX_RT_PRIO - 1);
 	__touch_watchdog();

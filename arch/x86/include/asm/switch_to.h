@@ -86,7 +86,7 @@ do {									\
 
 #ifdef CONFIG_LAZY_IRQ_DISABLE
 # define LAZY_CONTEXT "testq $-1, %%gs:lazy_irq_func; jne 1f;\n\t" \
-	"testq $(-1<<1),%%gs:lazy_irq_disabled_flags; jne 1f;\n\t" \
+	"testq $(~1),%%gs:lazy_irq_disabled_flags; jne 1f;\n\t" \
 	"orq $(1<<9),(%%rsp); jmp 2f; 1: andq $~(1<<9),(%%rsp); 2:\n\t"
 #else
 # define LAZY_CONTEXT

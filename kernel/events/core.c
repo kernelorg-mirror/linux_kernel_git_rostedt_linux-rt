@@ -2040,11 +2040,13 @@ unlock:
  * perf_event_for_each_child or perf_event_for_each as described
  * for perf_event_disable.
  */
+void print_lazy_irq(void);
 void perf_event_enable(struct perf_event *event)
 {
 	struct perf_event_context *ctx = event->ctx;
 	struct task_struct *task = ctx->task;
 
+	print_lazy_irq();
 	if (!task) {
 		/*
 		 * Enable the event on the cpu that it's on
