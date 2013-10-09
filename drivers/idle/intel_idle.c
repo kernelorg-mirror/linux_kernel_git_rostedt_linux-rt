@@ -338,6 +338,7 @@ static struct cpuidle_state atom_cstates[CPUIDLE_STATE_MAX] = {
  *
  * Must be called under local_irq_disable().
  */
+extern void lazy_test_idle(void);
 static int intel_idle(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int index)
 {
@@ -347,6 +348,7 @@ static int intel_idle(struct cpuidle_device *dev,
 	unsigned int cstate;
 	int cpu = smp_processor_id();
 
+	lazy_test_idle();
 	cstate = (((eax) >> MWAIT_SUBSTATE_SIZE) & MWAIT_CSTATE_MASK) + 1;
 
 	/*
@@ -366,6 +368,7 @@ static int intel_idle(struct cpuidle_device *dev,
 		if (!need_resched())
 			__mwait(eax, ecx);
 	}
+	lazy_test_idle();
 
 	if (!(lapic_timer_reliable_states & (1 << (cstate))))
 		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);

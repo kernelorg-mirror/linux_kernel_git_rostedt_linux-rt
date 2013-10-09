@@ -219,7 +219,6 @@ static DEFINE_PER_CPU_SHARED_ALIGNED(struct call_single_data, csd_data);
  * Returns 0 on success, else a negative status code.
  */
 unsigned long lazy_irq_flags(void);
-void print_lazy_debug(int line);
 int smp_call_function_single(int cpu, smp_call_func_t func, void *info,
 			     int wait)
 {
@@ -246,7 +245,6 @@ int smp_call_function_single(int cpu, smp_call_func_t func, void *info,
 			 && !oops_in_progress)) {
 		printk("raw:%lx current:%lx flags:%lx\n",
 		       raw_native_save_fl(), native_save_fl(), lazy_irq_flags());
-		print_lazy_debug(__LINE__);
 	}
 
 	if (cpu == this_cpu) {

@@ -20,14 +20,19 @@ static inline int __debug_locks_off(void)
  * Generic 'turn off all lock debugging' function:
  */
 extern int debug_locks_off(void);
+extern void print_lazy_debug(void);
+extern void print_lazy_irq(int line);
 
 #define DEBUG_LOCKS_WARN_ON(c)						\
 ({									\
 	int __ret = 0;							\
 									\
 	if (!oops_in_progress && unlikely(c)) {				\
-		if (debug_locks_off() && !debug_locks_silent)		\
+		if (debug_locks_off() && !debug_locks_silent) {		\
+			print_lazy_irq(__LINE__);			\
+			print_lazy_debug();				\
 			WARN(1, "DEBUG_LOCKS_WARN_ON(%s)", #c);		\
+		}							\
 		__ret = 1;						\
 	}								\
 	__ret;								\

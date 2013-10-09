@@ -849,10 +849,8 @@ static int __ref kernel_init(void *unused)
 	      "See Linux Documentation/init.txt for guidance.");
 }
 
-void print_lazy_debug(void);
 static noinline void __init kernel_init_freeable(void)
 {
-	print_lazy_debug();
 	/*
 	 * Wait until kthreadd is all set-up.
 	 */

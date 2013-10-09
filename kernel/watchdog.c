@@ -301,6 +301,8 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 	 */
 	duration = is_softlockup(touch_ts);
 	if (unlikely(duration)) {
+		static arch_spinlock_t lock = __ARCH_SPIN_LOCK_UNLOCKED;
+		
 		/*
 		 * If a virtual machine is stopped by the host it can look to
 		 * the watchdog like a soft lockup, check to see if the host
@@ -313,6 +315,7 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 		if (__this_cpu_read(soft_watchdog_warn) == true)
 			return HRTIMER_RESTART;
 
+		arch_spin_lock(&lock);
 		printk(KERN_EMERG "BUG: soft lockup - CPU#%d stuck for %us! [%s:%d]\n",
 			smp_processor_id(), duration,
 			current->comm, task_pid_nr(current));
@@ -322,6 +325,7 @@ static enum hrtimer_restart watchdog_timer_fn(struct hrtimer *hrtimer)
 			show_regs(regs);
 		else
 			dump_stack();
+		arch_spin_unlock(&lock);
 
 		trigger_all_cpu_backtrace();
 
@@ -341,23 +345,16 @@ static void watchdog_set_prio(unsigned int policy, unsigned int prio)
 	sched_setscheduler(current, policy, &param);
 }
 
-void print_lazy_irq(int line);
-void print_lazy_debug(void);
 static void watchdog_enable(unsigned int cpu)
 {
 	struct hrtimer *hrtimer = &__raw_get_cpu_var(watchdog_hrtimer);
 
-	print_lazy_debug();
-	print_lazy_irq(__LINE__);
 	set_current_state(TASK_INTERRUPTIBLE);
 	schedule_timeout(1);
-	printk("awake!\n");
-	print_lazy_irq(__LINE__);
 	/* kick off the timer for the hardlockup detector */
 	hrtimer_init(hrtimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer->function = watchdog_timer_fn;
 
-	print_lazy_irq(__LINE__);
 	/* Enable the perf event */
 	watchdog_nmi_enable(cpu);
 
@@ -365,7 +362,6 @@ static void watchdog_enable(unsigned int cpu)
 	hrtimer_start(hrtimer, ns_to_ktime(sample_period),
 		      HRTIMER_MODE_REL_PINNED);
 
-	print_lazy_irq(__LINE__);
 	/* initialize timestamp */
 	watchdog_set_prio(SCHED_FIFO, MAX_RT_PRIO - 1);
 	__touch_watchdog();

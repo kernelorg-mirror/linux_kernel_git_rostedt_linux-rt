@@ -60,6 +60,8 @@ void arch_trigger_all_cpu_backtrace(void)
 	smp_mb__after_clear_bit();
 }
 
+void print_lazy_debug(void);
+void print_lazy_irq(int line);
 static int __kprobes
 arch_trigger_all_cpu_backtrace_handler(unsigned int cmd, struct pt_regs *regs)
 {
@@ -70,8 +72,11 @@ arch_trigger_all_cpu_backtrace_handler(unsigned int cmd, struct pt_regs *regs)
 	if (cpumask_test_cpu(cpu, to_cpumask(backtrace_mask))) {
 		static arch_spinlock_t lock = __ARCH_SPIN_LOCK_UNLOCKED;
 
+		early_printk(".");
 		arch_spin_lock(&lock);
 		printk(KERN_WARNING "NMI backtrace for cpu %d\n", cpu);
+		print_lazy_irq(__LINE__);
+		print_lazy_debug();
 		show_regs(regs);
 		arch_spin_unlock(&lock);
 		cpumask_clear_cpu(cpu, to_cpumask(backtrace_mask));

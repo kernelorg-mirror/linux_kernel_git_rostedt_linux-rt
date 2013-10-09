@@ -377,6 +377,11 @@ EXPORT_SYMBOL(lazy_irq_func);
 EXPORT_SYMBOL(lazy_irq_vector);
 
 DEFINE_PER_CPU(unsigned long, lazy_irq_on);
+EXPORT_SYMBOL(lazy_irq_on);
+
+#ifdef CONFIG_LAZY_IRQ_DEBUG
+
+static int update_data = 1;
 
 static DEFINE_PER_CPU(unsigned long, last_hard_enable);
 static DEFINE_PER_CPU(unsigned long, last_soft_enable);
@@ -390,9 +395,12 @@ static DEFINE_PER_CPU(unsigned long, last_hard_disable_cnt);
 static DEFINE_PER_CPU(unsigned long, last_soft_disable_cnt);
 static DEFINE_PER_CPU(unsigned long, last_func_cnt);
 
-atomic_t last_count = ATOMIC_INIT(0);
+static DEFINE_PER_CPU(unsigned long, last_preempt_enable);
+static DEFINE_PER_CPU(unsigned long, last_preempt_disable);
+static DEFINE_PER_CPU(unsigned long, last_preempt_enable_cnt);
+static DEFINE_PER_CPU(unsigned long, last_preempt_disable_cnt);
 
-static int update_data = 1;
+atomic_t last_count = ATOMIC_INIT(0);
 
 #define UPDATE_LAST(type)						\
 	do {								\
@@ -427,6 +435,19 @@ void update_last_soft_disable(unsigned long addr)
 }
 EXPORT_SYMBOL(update_last_soft_disable);
 
+
+void update_last_preempt_disable(unsigned long addr)
+{
+	UPDATE_LAST(preempt_disable);
+}
+EXPORT_SYMBOL(update_last_preempt_disable);
+
+void update_last_preempt_enable(unsigned long addr)
+{
+	UPDATE_LAST(preempt_enable);
+}
+EXPORT_SYMBOL(update_last_preempt_enable);
+
 void update_last_func(unsigned long addr)
 {
 //	UPDATE_LAST(func);
@@ -438,20 +459,6 @@ void update_last_func(unsigned long addr)
 #endif
 	}
 }
-
-void do_preempt_disable(void)
-{
-	asm volatile ("addq $1,%%gs:lazy_irq_on" : : : "memory");
-	BUG_ON(this_cpu_read(lazy_irq_on) > 1);
-}
-EXPORT_SYMBOL(do_preempt_disable);
-
-void do_preempt_enable(void)
-{
-	BUG_ON(this_cpu_read(lazy_irq_on) != 1);
-	asm volatile ("subq $1,%%gs:lazy_irq_on" : : : "memory");
-}
-EXPORT_SYMBOL(do_preempt_enable);
 
 void print_lazy_debug(void)
 {
@@ -471,6 +478,12 @@ void print_lazy_debug(void)
 	printk("Last func: %pS (%ld)\n",
 	       (void *)this_cpu_read(last_func),
 	       this_cpu_read(last_func_cnt));
+	printk("Last preempt enable: %pS (%ld)\n",
+	       (void *)this_cpu_read(last_preempt_enable),
+	       this_cpu_read(last_preempt_enable_cnt));
+	printk("Last preempt disable: %pS (%ld)\n",
+	       (void *)this_cpu_read(last_preempt_disable),
+	       this_cpu_read(last_preempt_disable_cnt));
 	update_data = 1;
 }
 
@@ -481,6 +494,47 @@ void print_lazy_irq(int line)
 	       __builtin_return_address(0), line,
 	       raw_native_save_fl(), native_save_fl(), get_lazy_irq_flags());
 	update_data = 1;
+}
+
+asmlinkage void lazy_irq_debug(long id, long err, void *func)
+{
+	update_data = 0;
+	printk("(%ld err=%lx f=%pS) flags=%lx vect=%lx func=%pS\n", id, ~err, func,
+	       get_lazy_irq_flags(),
+	       this_cpu_read(lazy_irq_vector),
+	       this_cpu_read(lazy_irq_func));
+	update_data = 1;
+}
+
+void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw)
+{
+	static int once;
+
+	once = 1;
+	update_data = 0;
+	printk("here!\n");
+	lazy_irq_add_temp();
+	printk("FAILED HERE %s %d\n", file, line);
+	printk("flags=%lx init_raw=%lx\n", flags, raw);
+	printk("raw=%lx\n", raw_native_save_fl());
+	print_lazy_debug();
+	raw_native_irq_enable();
+	update_data = 1;
+	BUG();
+}
+EXPORT_SYMBOL(lazy_irq_bug);
+
+#else
+static inline void update_last_func(unsigned long addr) { }
+#endif /* CONFIG_LAZY_IRQ_DEBUG */
+
+void lazy_test_idle(void)
+{
+	unsigned long flags;
+
+	flags = get_lazy_irq_flags();
+	WARN_ON(!(flags & LAZY_IRQ_FL_IDLE));
+	WARN_ON(flags & LAZY_IRQ_FL_DISABLED);
 }
 
 #define BUG_ON_IRQS_ENABLED()					\
@@ -522,7 +576,6 @@ extern void native_simulate_irq(void *func, unsigned long orig_ax);
 
 void lazy_irq_simulate(void *func)
 {
-//	printk("simulate %pS\n", func);
 	this_cpu_write(lazy_irq_func, NULL);
 
 	BUG_ON_IRQS_ENABLED();
@@ -532,6 +585,16 @@ void lazy_irq_simulate(void *func)
 	native_simulate_irq(func, this_cpu_read(lazy_irq_vector));
 }
 EXPORT_SYMBOL(lazy_irq_simulate);
+
+static inline void lazy_irq_sub_idle(void)
+{
+	lazy_irq_sub(LAZY_IRQ_FL_IDLE);
+}
+
+static inline void lazy_irq_add_idle(void)
+{
+	lazy_irq_add(LAZY_IRQ_FL_IDLE);
+}
 
 int lazy_irq_idle_enter(void)
 {
@@ -544,10 +607,13 @@ int lazy_irq_idle_enter(void)
 	 * CPU do the work.
 	 */
 	if (flags >> LAZY_IRQ_REAL_DISABLE_BIT) {
+#ifdef CONFIG_LAZY_IRQ_DEBUG
 		if (raw_native_save_fl() & X86_EFLAGS_IF)
 			lazy_irq_bug(__func__, __LINE__, flags, raw_native_save_fl());
 		if (flags & LAZY_IRQ_FL_DISABLED)
 			lazy_irq_bug(__func__, __LINE__, flags, raw_native_save_fl());
+#endif
+		lazy_irq_add_idle();
 		return 1;
 	}
 
@@ -563,11 +629,14 @@ int lazy_irq_idle_enter(void)
 		BUG_ON_IRQS_ENABLED();
 
 	raw_native_irq_disable();
+
 	if (this_cpu_read(lazy_irq_func)) {
 		/* Process the interrupt and do not go idle */
 		local_irq_enable();
 		return 0;
 	}
+
+	lazy_irq_add_idle();
 
 	flags = get_lazy_irq_flags();
 	if (flags & LAZY_IRQ_FL_TEMP_DISABLE)
@@ -578,34 +647,17 @@ int lazy_irq_idle_enter(void)
 	return 1;
 }
 
-asmlinkage void lazy_irq_debug(long id, long err, void *func)
+void lazy_irq_idle_exit(void)
 {
-	update_data = 0;
-	printk("(%ld err=%lx f=%pS) flags=%lx vect=%lx func=%pS\n", id, ~err, func,
-	       get_lazy_irq_flags(),
-	       this_cpu_read(lazy_irq_vector),
-	       this_cpu_read(lazy_irq_func));
-	update_data = 1;
+	lazy_irq_sub_idle();
+	BUG_ON(get_lazy_irq_flags() || get_lazy_irq_func());
 }
 
-typedef void (*irq_func_t)(struct pt_regs *regs);
-
-void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw)
-{
-	static int once;
-
-	once = 1;
-	update_data = 0;
-	lazy_irq_add_temp();
-	printk("FAILED HERE %s %d\n", file, line);
-	printk("flags=%lx init_raw=%lx\n", flags, raw);
-	printk("raw=%lx\n", raw_native_save_fl());
-	print_lazy_debug();
-	raw_native_irq_enable();
-	update_data = 1;
-	BUG();
-}
-EXPORT_SYMBOL(lazy_irq_bug);
-
+#if 0
+EXPORT_SYMBOL(do_preempt_disable);
+EXPORT_SYMBOL(do_preempt_enable);
+EXPORT_SYMBOL(native_irq_disable);
+EXPORT_SYMBOL(native_irq_enable);
+#endif
 #endif /* CONFIG_LAZY_IRQ_DISABLE */
 

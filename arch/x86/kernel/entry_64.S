@@ -978,6 +978,8 @@ END(interrupt)
 .previous
 
 #ifdef CONFIG_LAZY_IRQ_DISABLE
+
+#ifdef CONFIG_LAZY_IRQ_DEBUG
 	.macro LAZY_DEBUG int func=0
 	pushq %rdi
 	pushq %rsi
@@ -1016,6 +1018,10 @@ END(interrupt)
 	jmp 1f
 1:
 	.endm
+#if 0
+	LAZY_DEBUG 0
+#endif
+#endif /* CONFIG_LAZY_IRQ_DEBUG */
 	
 	.macro LAZY_DISABLED_CHECK func
 	/* If in userspace, interrupts are always enabled */
@@ -1031,9 +1037,6 @@ END(interrupt)
 	.macro LAZY_DISABLED_START
 	addq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 	.endm
-#if 0
-	LAZY_DEBUG 0
-#endif
 
 	.macro LAZY_DISABLED_DONE
 	subq  $LAZY_IRQ_FL_REAL_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)

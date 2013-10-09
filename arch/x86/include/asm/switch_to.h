@@ -85,9 +85,14 @@ do {									\
 #define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp ; " LAZY_CONTEXT "popf\t"
 
 #ifdef CONFIG_LAZY_IRQ_DISABLE
+#define LAZY_CONTEXT "andq $~(1<<9),(%%rsp); orq $"	\
+	__stringify(LAZY_IRQ_FL_TEMP_DISABLE)		\
+	",%%gs:lazy_irq_disabled_flags\n\t"
+#if 0
 # define LAZY_CONTEXT "testq $-1, %%gs:lazy_irq_func; jne 1f;\n\t" \
 	"testq $(~1),%%gs:lazy_irq_disabled_flags; jne 1f;\n\t" \
 	"orq $(1<<9),(%%rsp); jmp 2f; 1: andq $~(1<<9),(%%rsp); 2:\n\t"
+#endif
 #else
 # define LAZY_CONTEXT
 #endif

@@ -8,6 +8,7 @@
 #include <linux/linkage.h>
 #include <asm/dwarf2.h>
 #include <asm/calling.h>
+#include <asm/irqflags.h>
 
 	/* rdi:	arg1 ... normal C conventions. rax is saved/restored. */
 	.macro THUNK name, func, put_ret_addr_in_rdi=0
@@ -22,7 +23,9 @@
 	movq_cfi_restore 9*8, rdi
 	.endif
 
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
 	call \func
+	subq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
 	jmp  restore
 	CFI_ENDPROC
 	.endm
