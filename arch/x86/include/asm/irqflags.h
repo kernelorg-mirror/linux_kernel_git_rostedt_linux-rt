@@ -100,8 +100,19 @@ static inline void native_halt(void)
 #define native_restore_fl(flags) raw_native_restore_fl(flags)
 #define native_irq_disable() raw_native_irq_disable()
 #define native_irq_enable() raw_native_irq_enable()
+static inline lazy_irq_idle_enter(void)
+{
+	return 1;
+}
+static inline void lazy_irq_idle_exit(void) { }
+static inline void print_lazy_debug(void) { }
+static inline void print_lazy_irq(int line) { }
+static inline void lazy_test_idle(void) { }
 #else
 #include <linux/bug.h>
+
+extern int lazy_irq_idle_enter(void);
+extern void lazy_irq_idle_exit(void);
 
 void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw);
 
@@ -129,7 +140,17 @@ static inline void do_preempt_enable(void)
 	if (!once)
 		update_last_preempt_enable((long)__builtin_return_address(0));
 }
+
+void print_lazy_debug(void);
+void print_lazy_irq(int line);
+void lazy_test_idle(void);
+
 #else
+/*
+ * As preempt_disable is still a task variable, we need to make
+ * it a per_cpu variable for our own purposes. This can be fixed
+ * when preempt_count becomes a per cpu variable.
+ */
 static inline void do_preempt_disable(void)
 {
 	asm volatile ("addq $1,%%gs:lazy_irq_on\n" : : : "memory");
@@ -142,11 +163,16 @@ static inline void do_preempt_enable(void)
 
 static inline void print_lazy_debug(void) { }
 static inline void print_lazy_irq(int line) { }
+static inline void lazy_test_idle(void) { }
 
 #endif /* CONFIG_LAZY_IRQ_DEBUG */
 
 void lazy_irq_simulate(void *func);
 
+/*
+ * Unfortunatetly, due to include hell, we can't include percpu.h.
+ * Thus, we open code our fetching and changing of per cpu variables.
+ */
 static inline unsigned long get_lazy_irq_flags(void)
 {
 	unsigned long flags;
@@ -171,10 +197,10 @@ static inline unsigned long native_save_fl(void)
 	 * It might be possible that if irqs are fully enabled
 	 * we could migrate. But the result of this operation
 	 * will be the same regardless if we move from one
-	 * CPU to another.
-	 *
-	 * Inverse the result, as the test checks if
-	 * NATIVE_IRQ_DISABLED is clear, not set.
+	 * CPU to another. That is, if flags is not zero, we
+	 * wont schedule, and we can only migrate if flags is
+	 * zero, which means it will be zero after the migrate
+	 * or scheduled back in.
 	 */
 	flags = get_lazy_irq_flags();
 
@@ -184,6 +210,12 @@ static inline unsigned long native_save_fl(void)
 	return flags & LAZY_IRQ_FL_DISABLED ? 0 : X86_EFLAGS_IF;
 }
 
+/*
+ * Again, because of include hell, we can't include local.h, and
+ * we need to make sure we use a true "add" and "sub" that is
+ * atomic for the CPU. We can't have a load modify store, and
+ * I don't trust gcc enough to think it will do that for us.
+ */
 static inline void lazy_irq_sub(unsigned long val)
 {
 #ifdef CONFIG_LAZY_IRQ_DEBUG
@@ -235,7 +267,7 @@ static inline void native_irq_disable(void)
 		/* Always disable for real not in lazy mode */
 		if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT)
 			raw_native_irq_disable();
-		/* If native_flags are set, we already disabled preemption */
+		/* If flags is set, we already disabled preemption */
 		do_preempt_enable();
 		return;
 	}
@@ -263,22 +295,37 @@ static inline void native_irq_enable(void)
 		goto out;
 
 	if (flags >> LAZY_IRQ_TEMP_DISABLE_BIT) {
-		WARN_ON((flags & LAZY_IRQ_FL_IDLE) && (flags & LAZY_IRQ_FL_DISABLED));
 #ifdef CONFIG_LAZY_IRQ_DEBUG
+		WARN_ON((flags & LAZY_IRQ_FL_IDLE) && (flags & LAZY_IRQ_FL_DISABLED));
 		if ((flags & ~LAZY_IRQ_FL_IDLE) && raw_native_save_fl() & X86_EFLAGS_IF)
 			lazy_irq_bug(__func__, __LINE__, flags, raw);
 #endif
+		/*
+		 * If we temporary disabled interrupts, that means
+		 * we did so from assembly, and we want to go back
+		 * to lazy irq disable mode.
+		 */
 		if (flags & LAZY_IRQ_FL_TEMP_DISABLE) {
 			lazy_irq_sub_temp();
-			flags = get_lazy_irq_flags();
-			if (flags == LAZY_IRQ_FL_DISABLED)
+			/*
+			 * If we are not in interrupt context, we need
+			 * to enable irqs in lazy mode too when temp flag was set.
+			 */
+			if ((flags & ~LAZY_IRQ_FL_TEMP_DISABLE) == LAZY_IRQ_FL_DISABLED)
 				lazy_irq_sub_disable();
 		}
 #ifdef CONFIG_LAZY_IRQ_DEBUG
 		if (get_lazy_irq_flags() & LAZY_IRQ_FL_DISABLED)
 			lazy_irq_bug(__func__, __LINE__, flags, raw);
 #endif
-
+		/*
+		 * If func is set, then interrupts was disabled when coming
+		 * in, or up to the point that we had the DISABLED flag set.
+		 * We cleared it, so it is safe to read the func, as it only
+		 * will be set when DISABLED flag set, and if that does happen
+		 * interrupts will be disabled to prevent another interrupt
+		 * coming in now.
+		 */
 		func = get_lazy_irq_func();
 		if (func)
 			lazy_irq_simulate(func); /* enables interrupts */
@@ -295,19 +342,16 @@ static inline void native_irq_enable(void)
 	/*
 	 * Grab func *after* enabling lazy irqs, this prevents the race
 	 * where we enable the lazy irq but a interrupt comes in when
-	 * we do it and sets func.
+	 * we do it and sets func. If an interrupt comes in after we
+	 * clear the DISABLED flag, it will just run the interrupt normally.
 	 */
 	func = get_lazy_irq_func();
 
 	/*
-	 * At this moment we can be in one of two states.
-	 * Either native_flags == 0 or native_flags == triggered
-	 * If zero, and an interrupt comes in, then it will simply
-	 *  process the interrupt.
-	 * If it is triggered, then the interrupt returned with
-	 *  real interrupts disabled, and we do not need to worry
-	 *  about interrupts coming in now. Call native_simulate_irq()
-	 *  to do the nasty work.
+	 * If func is set, then an interrupt came in when the DISABLED
+	 * flag was set (it's no longer set), and interrupts will be
+	 * really disabled because of that. In that case, we need to
+	 * simulate the interrupt (which will enable interrupts too).
 	 */
 	if (func) {
 #ifdef CONFIG_LAZY_IRQ_DEBUG
@@ -319,13 +363,13 @@ static inline void native_irq_enable(void)
 
 	do_preempt_enable();
 out:
-	return;
 #ifdef CONFIG_LAZY_IRQ_DEBUG
 	if (!(raw_native_save_fl() & X86_EFLAGS_IF)) {
 		printk("func=%pS flags=%lx\n", func, get_lazy_irq_flags());
 		lazy_irq_bug(__func__, __LINE__, flags, raw);
 	}
 #endif
+	return;
 }
 
 static inline void native_restore_fl(unsigned long flags)

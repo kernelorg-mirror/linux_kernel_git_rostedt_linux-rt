@@ -10,6 +10,19 @@
 #include <asm/calling.h>
 #include <asm/irqflags.h>
 
+#ifdef CONFIG_LAZY_IRQ_DISABLE
+	.macro LAZY_IRQ_ENTER
+	addq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
+	.endm
+
+	.macro LAZY_IRQ_EXIT
+	subq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
+	.endm
+#else
+# define LAZY_IRQ_ENTER
+# define LAZY_IRQ_EXIT
+#endif
+
 	/* rdi:	arg1 ... normal C conventions. rax is saved/restored. */
 	.macro THUNK name, func, put_ret_addr_in_rdi=0
 	.globl \name
@@ -23,9 +36,9 @@
 	movq_cfi_restore 9*8, rdi
 	.endif
 
-	addq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
+	LAZY_IRQ_ENTER
 	call \func
-	subq  $LAZY_IRQ_FL_REAL_DISABLE, %gs:lazy_irq_disabled_flags
+	LAZY_IRQ_EXIT
 	jmp  restore
 	CFI_ENDPROC
 	.endm

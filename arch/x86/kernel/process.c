@@ -293,16 +293,6 @@ void arch_cpu_idle_dead(void)
 	play_dead();
 }
 
-#ifdef CONFIG_LAZY_IRQ_DISABLE
-extern int lazy_irq_idle_enter(void);
-extern void lazy_irq_idle_exit(void);
-#else
-static inline lazy_irq_idle_enter(void)
-{
-	return 1;
-}
-static inline void lazy_irq_idle_exit(void) { }
-#endif
 /*
  * Called from the generic idle code.
  */

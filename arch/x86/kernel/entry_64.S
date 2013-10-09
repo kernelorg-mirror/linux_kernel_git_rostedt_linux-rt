@@ -548,6 +548,7 @@ ENTRY(ret_from_fork)
 	popfq_cfi				# reset kernel eflags
 
 #ifdef CONFIG_LAZY_IRQ_DISABLE
+	/* Return from fork always disables interrupts for real. */
 	orq $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 #endif
 
@@ -1050,22 +1051,22 @@ END(interrupt)
 	 * disabling feature.
 	 *
 	 * When a trap is hit, interrupts are disabled.
-	 * This is where things get a little tricky.
-	 * If interrupts are soft disabled, we keep interrupts disabled
-	 * throughout the trap.
-	 * On return of the trap, we check if there's a pending interrupt.
-	 * If there is, we keep the interrupts disabled. But if there's
-	 * no pending interrupt, we enabled them, again.
-	 *
-	 * If interrupts are not soft disabled at the start of the trap.
-	 * We treat the trap like a normal interrupt.
+	 * We set the TEMP flag to let the native_irq_enable()
+	 * know to really enable interrupts.
 	 */
 	.macro LAZY_DISABLE_TRAP_ENTRY
 	testl $(~(LAZY_IRQ_FL_TEMP_DISABLE-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
 	jne 1f
 	addq  $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 
-	/* If interrupts are soft disabled, then make eflags disabled too */
+	/*
+	 * If interrupts are soft disabled, then make eflags disabled too.
+	 * This is required because there's lots of places that read the
+	 * regs->eflags to make decisions. Ideally, we should change all these
+	 * places to test for the soft disable flag, but for now this is
+	 * easier to do. But unfortunately, this is also the page fault handler
+	 * which is going to kill all our efforts with the lazy irq disabling :(
+	 */
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
 	jnc 1f
 	andq $~(1<<9), EFLAGS(%rsp)
@@ -1073,7 +1074,7 @@ END(interrupt)
 	.endm
 
 	.macro LAZY_DISABLE_TRAP_EXIT
-	/* Hard disabled? Do nothing */
+	/* Hard disabled? Do nothing (we are in interrupt context) */
 	testl $(~(LAZY_IRQ_FL_REAL_DISABLE-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
 	jne 2f
 
@@ -1086,10 +1087,7 @@ END(interrupt)
 	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
 	jnc 2f
 
-	/*
-	 * If we are nested or there's a pending interrupt,
-	 * keep interrupts disabled, otherwise enabled them.
-	 */
+	/* If there's a pending interrupt, keep interrupts disabled */
 
 	/* Interrupt triggered? */
 	testl $-1, PER_CPU_VAR(lazy_irq_func)
@@ -1110,8 +1108,7 @@ irq_is_disabled:
 	andq $~(1 << 9), 16(%rsp)	/* keep irqs disabled */
 	jmp irq_return
 #else
-	.macro LAZY_DISABLED func
-	call \func
+	.macro LAZY_DISABLED_CHECK func
 	.endm
 #define LAZY_DISABLED_START
 #define LAZY_DISABLED_DONE
@@ -1274,6 +1271,7 @@ ENTRY(retint_kernel)
 	bt   $9,EFLAGS-ARGOFFSET(%rsp)	/* interrupts off? */
 	jnc  retint_restore_args
 #ifdef CONFIG_LAZY_IRQ_DISABLE
+	/* Need to check our own preempt disabled variable */
 	cmpl $0,PER_CPU_VAR(lazy_irq_on)
 	jnz  retint_restore_args
 	orq $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
@@ -1814,6 +1812,12 @@ END(error_exit)
  * Returns enabling interrupts
  * The calling function was kind enough to pass
  * us the irq function and irq vector to use.
+ *
+ * This creates its own interrupt stack frame and
+ * then calls the interrupt as if the interrupt was
+ * called by hardware. It then returns via the normal
+ * interrupt return path which will enable interrupts
+ * with an iretq.
  */
 ENTRY(native_simulate_irq)
 	CFI_STARTPROC

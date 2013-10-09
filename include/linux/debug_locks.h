@@ -20,8 +20,6 @@ static inline int __debug_locks_off(void)
  * Generic 'turn off all lock debugging' function:
  */
 extern int debug_locks_off(void);
-extern void print_lazy_debug(void);
-extern void print_lazy_irq(int line);
 
 #define DEBUG_LOCKS_WARN_ON(c)						\
 ({									\

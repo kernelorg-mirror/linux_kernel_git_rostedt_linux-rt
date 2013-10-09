@@ -368,7 +368,7 @@ void fixup_irqs(void)
 #include <linux/percpu.h>
 #include <asm/local.h>
 
-/* Start out enabling and disabling for real */
+/* Start out with real hard irqs disabled */
 DEFINE_PER_CPU(local_t, lazy_irq_disabled_flags) = LOCAL_INIT(LAZY_IRQ_FL_TEMP_DISABLE);
 DEFINE_PER_CPU(void *, lazy_irq_func);
 DEFINE_PER_CPU(unsigned long, lazy_irq_vector);
@@ -524,10 +524,6 @@ void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long
 }
 EXPORT_SYMBOL(lazy_irq_bug);
 
-#else
-static inline void update_last_func(unsigned long addr) { }
-#endif /* CONFIG_LAZY_IRQ_DEBUG */
-
 void lazy_test_idle(void)
 {
 	unsigned long flags;
@@ -536,6 +532,10 @@ void lazy_test_idle(void)
 	WARN_ON(!(flags & LAZY_IRQ_FL_IDLE));
 	WARN_ON(flags & LAZY_IRQ_FL_DISABLED);
 }
+
+#else
+static inline void update_last_func(unsigned long addr) { }
+#endif /* CONFIG_LAZY_IRQ_DEBUG */
 
 #define BUG_ON_IRQS_ENABLED()					\
 	do {							\
@@ -569,8 +569,6 @@ unsigned long lazy_irq_flags(void)
  *
  * Defined in assembly, this function is used to simulate an interrupt
  * that happened while the irq lazy disabling was in effect.
- *
- * Basically this will simulate the 
  */
 extern void native_simulate_irq(void *func, unsigned long orig_ax);
 
@@ -596,6 +594,17 @@ static inline void lazy_irq_add_idle(void)
 	lazy_irq_add(LAZY_IRQ_FL_IDLE);
 }
 
+/**
+ * lazy_irq_idle_enter - handle lazy irq disabling entering idle
+ *
+ * When entering idle, we need to check if an interrupt came in, and
+ * if it did, then we should not go into the idle code.
+ * If no interrupt came in, we need to switch to a mode that
+ * we enable and disable interrupts for real, and turn off any
+ * lazy irq disable flags. The idle code is special as it can
+ * enter with interrupts disabled and leave with interrupts enabled
+ * via assembly.
+ */
 int lazy_irq_idle_enter(void)
 {
 	unsigned long flags;
@@ -628,6 +637,7 @@ int lazy_irq_idle_enter(void)
 	if (this_cpu_read(lazy_irq_func))
 		BUG_ON_IRQS_ENABLED();
 
+	/* Disable for real to prevent any races */
 	raw_native_irq_disable();
 
 	if (this_cpu_read(lazy_irq_func)) {

@@ -338,7 +338,6 @@ static struct cpuidle_state atom_cstates[CPUIDLE_STATE_MAX] = {
  *
  * Must be called under local_irq_disable().
  */
-extern void lazy_test_idle(void);
 static int intel_idle(struct cpuidle_device *dev,
 		struct cpuidle_driver *drv, int index)
 {

@@ -85,14 +85,19 @@ do {									\
 #define RESTORE_CONTEXT "movq %%rbp,%%rsi ; popq %%rbp ; " LAZY_CONTEXT "popf\t"
 
 #ifdef CONFIG_LAZY_IRQ_DISABLE
+/*
+ * When doing the context switch, the DISABLED flag should be set.
+ * But interrupts may not be disabled, and we may switch to having them
+ * disabled. Worse yet, they may be disabled and we are switching to having
+ * them enabled, and if we do that, a pending interrupt may be lost.
+ * The safest thing to do (for now) is to just set the TEMP flag and
+ * disable interrupts in the switch. This will cause the enabling to
+ * do the check for any interrupts that came in during the switch that
+ * we don't want to miss.
+ */
 #define LAZY_CONTEXT "andq $~(1<<9),(%%rsp); orq $"	\
 	__stringify(LAZY_IRQ_FL_TEMP_DISABLE)		\
 	",%%gs:lazy_irq_disabled_flags\n\t"
-#if 0
-# define LAZY_CONTEXT "testq $-1, %%gs:lazy_irq_func; jne 1f;\n\t" \
-	"testq $(~1),%%gs:lazy_irq_disabled_flags; jne 1f;\n\t" \
-	"orq $(1<<9),(%%rsp); jmp 2f; 1: andq $~(1<<9),(%%rsp); 2:\n\t"
-#endif
 #else
 # define LAZY_CONTEXT
 #endif

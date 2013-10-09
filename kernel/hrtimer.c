@@ -1175,7 +1175,6 @@ ktime_t hrtimer_get_next_event(void)
 }
 #endif
 
-void print_lazy_irq(int line);
 static void __hrtimer_init(struct hrtimer *timer, clockid_t clock_id,
 			   enum hrtimer_mode mode)
 {
