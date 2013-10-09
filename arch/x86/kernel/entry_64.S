@@ -1074,28 +1074,28 @@ END(interrupt)
 	.endm
 
 	.macro LAZY_DISABLE_TRAP_EXIT
-	/* Hard disabled? Do nothing (we are in interrupt context) */
-	testl $(~(LAZY_IRQ_FL_REAL_DISABLE-1)), PER_CPU_VAR(lazy_irq_disabled_flags)
-	jne 2f
+	/*
+	 * If interrupts we soft disabled or really disabled, then we
+	 * don't need to do anything. The TEMP flag will be set telling
+	 * the next native_irq_enable() to enable interrupts for real.
+	 * No need to enable them now.
+	 *
+	 * The trap really should not have cleared the TEMP flag, because
+	 * that means it enabled interrupts when trapping from a interrupt
+	 * disabled context, which would be really bad to do.
+	 */
+	bt $9, EFLAGS(%rsp)
+	jnc 1f
 
+	/*
+	 * EFLAGS has IRQs enabled, interrupts should be enabled both real
+	 * and in lazy mode, just clear the TEMP flag if it is set
+	 */
 	bt  $LAZY_IRQ_TEMP_DISABLE_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
 	jnc 1f
 	subq  $LAZY_IRQ_FL_TEMP_DISABLE, PER_CPU_VAR(lazy_irq_disabled_flags)
 
 1:
-	/* Soft disabled? */
-	bt  $LAZY_IRQ_DISABLED_BIT, PER_CPU_VAR(lazy_irq_disabled_flags)
-	jnc 2f
-
-	/* If there's a pending interrupt, keep interrupts disabled */
-
-	/* Interrupt triggered? */
-	testl $-1, PER_CPU_VAR(lazy_irq_func)
-	jne 2f
-
-	/* Return with interrupts enabled */
-	orq $(1 << 9), EFLAGS(%rsp)
-2:
 	.endm
 
 irq_is_disabled:
