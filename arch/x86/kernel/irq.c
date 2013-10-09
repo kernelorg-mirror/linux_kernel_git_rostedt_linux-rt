@@ -411,44 +411,44 @@ atomic_t last_count = ATOMIC_INIT(0);
 		}							\
 	} while (0)
 
-void update_last_hard_enable(unsigned long addr)
+void notrace update_last_hard_enable(unsigned long addr)
 {
 	UPDATE_LAST(hard_enable);
 }
 EXPORT_SYMBOL(update_last_hard_enable);
 
-void update_last_soft_enable(unsigned long addr)
+void notrace update_last_soft_enable(unsigned long addr)
 {
 	UPDATE_LAST(soft_enable);
 }
 EXPORT_SYMBOL(update_last_soft_enable);
 
-void update_last_hard_disable(unsigned long addr)
+void notrace update_last_hard_disable(unsigned long addr)
 {
 	UPDATE_LAST(hard_disable);
 }
 EXPORT_SYMBOL(update_last_hard_disable);
 
-void update_last_soft_disable(unsigned long addr)
+void notrace update_last_soft_disable(unsigned long addr)
 {
 	UPDATE_LAST(soft_disable);
 }
 EXPORT_SYMBOL(update_last_soft_disable);
 
 
-void update_last_preempt_disable(unsigned long addr)
+void notrace update_last_preempt_disable(unsigned long addr)
 {
 	UPDATE_LAST(preempt_disable);
 }
 EXPORT_SYMBOL(update_last_preempt_disable);
 
-void update_last_preempt_enable(unsigned long addr)
+void notrace update_last_preempt_enable(unsigned long addr)
 {
 	UPDATE_LAST(preempt_enable);
 }
 EXPORT_SYMBOL(update_last_preempt_enable);
 
-void update_last_func(unsigned long addr)
+void notrace update_last_func(unsigned long addr)
 {
 //	UPDATE_LAST(func);
 	if (update_data) {
@@ -460,34 +460,34 @@ void update_last_func(unsigned long addr)
 	}
 }
 
-void print_lazy_debug(void)
+void notrace print_lazy_debug(void)
 {
 	update_data = 0;
-	printk("Last hard enable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_hard_enable),
-	       this_cpu_read(last_hard_enable_cnt));
-	printk("Last soft enable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_soft_enable),
-	       this_cpu_read(last_soft_enable_cnt));
-	printk("Last hard disable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_hard_disable),
-	       this_cpu_read(last_hard_disable_cnt));
-	printk("Last soft disable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_soft_disable),
-	       this_cpu_read(last_soft_disable_cnt));
-	printk("Last func: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_func),
-	       this_cpu_read(last_func_cnt));
-	printk("Last preempt enable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_preempt_enable),
-	       this_cpu_read(last_preempt_enable_cnt));
-	printk("Last preempt disable: %pS (%ld)\n",
-	       (void *)this_cpu_read(last_preempt_disable),
-	       this_cpu_read(last_preempt_disable_cnt));
+	printk("Last hard enable:     (%ld) %pS\n",
+	       this_cpu_read(last_hard_enable_cnt),
+	       (void *)this_cpu_read(last_hard_enable));
+	printk("Last soft enable:     (%ld) %pS\n",
+	       this_cpu_read(last_soft_enable_cnt),
+	       (void *)this_cpu_read(last_soft_enable));
+	printk("Last hard disable:    (%ld) %pS\n",
+	       this_cpu_read(last_hard_disable_cnt),
+	       (void *)this_cpu_read(last_hard_disable));
+	printk("Last soft disable:    (%ld) %pS\n",
+	       this_cpu_read(last_soft_disable_cnt),
+	       (void *)this_cpu_read(last_soft_disable));
+	printk("Last func:            (%ld) %pS\n",
+	       this_cpu_read(last_func_cnt),
+	       (void *)this_cpu_read(last_func));
+	printk("Last preempt enable:  (%ld) %pS\n",
+	       this_cpu_read(last_preempt_enable_cnt),
+	       (void *)this_cpu_read(last_preempt_enable));
+	printk("Last preempt disable: (%ld) %pS\n",
+	       this_cpu_read(last_preempt_disable_cnt),
+	       (void *)this_cpu_read(last_preempt_disable));
 	update_data = 1;
 }
 
-void print_lazy_irq(int line)
+void notrace print_lazy_irq(int line)
 {
 	update_data = 0;
 	printk("[%pS:%d] raw:%lx current:%lx flags:%lx\n",
@@ -496,7 +496,7 @@ void print_lazy_irq(int line)
 	update_data = 1;
 }
 
-asmlinkage void lazy_irq_debug(long id, long err, void *func)
+asmlinkage void notrace lazy_irq_debug(long id, long err, void *func)
 {
 	update_data = 0;
 	printk("(%ld err=%lx f=%pS) flags=%lx vect=%lx func=%pS\n", id, ~err, func,
@@ -506,13 +506,13 @@ asmlinkage void lazy_irq_debug(long id, long err, void *func)
 	update_data = 1;
 }
 
-void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw)
+void notrace
+lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long raw)
 {
 	static int once;
 
 	once = 1;
 	update_data = 0;
-	printk("here!\n");
 	lazy_irq_add_temp();
 	printk("FAILED HERE %s %d\n", file, line);
 	printk("flags=%lx init_raw=%lx\n", flags, raw);
@@ -524,7 +524,7 @@ void lazy_irq_bug(const char *file, int line, unsigned long flags, unsigned long
 }
 EXPORT_SYMBOL(lazy_irq_bug);
 
-void lazy_test_idle(void)
+void notrace lazy_test_idle(void)
 {
 	unsigned long flags;
 
@@ -557,7 +557,7 @@ __init static int init_lazy_irqs(void)
 }
 early_initcall(init_lazy_irqs);
 
-unsigned long lazy_irq_flags(void)
+unsigned long notrace lazy_irq_flags(void)
 {
 	return get_lazy_irq_flags();
 }
@@ -572,7 +572,7 @@ unsigned long lazy_irq_flags(void)
  */
 extern void native_simulate_irq(void *func, unsigned long orig_ax);
 
-void lazy_irq_simulate(void *func)
+void notrace lazy_irq_simulate(void *func)
 {
 	this_cpu_write(lazy_irq_func, NULL);
 
@@ -605,7 +605,7 @@ static inline void lazy_irq_add_idle(void)
  * enter with interrupts disabled and leave with interrupts enabled
  * via assembly.
  */
-int lazy_irq_idle_enter(void)
+int notrace lazy_irq_idle_enter(void)
 {
 	unsigned long flags;
 
@@ -657,7 +657,7 @@ int lazy_irq_idle_enter(void)
 	return 1;
 }
 
-void lazy_irq_idle_exit(void)
+void notrace lazy_irq_idle_exit(void)
 {
 	lazy_irq_sub_idle();
 	BUG_ON(get_lazy_irq_flags() || get_lazy_irq_func());
